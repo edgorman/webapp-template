@@ -21,7 +21,7 @@ concurrency:
 jobs:
   # moon decides which Terraform deployment(s) a diff reaches via `moon query affected`. There is
   # no blanket .github/** glob here because none is needed: every deploy-{root,staging,prod}:plan
-  # task's own `inputs` (#195/#206) already lists the exact composite actions and workflow files
+  # task's own `inputs` already lists the exact composite actions and workflow files
   # that environment's job depends on, so nothing is left for a repo-wide fallback to paper over.
   changed:
     # Skipped until infrastructure/root's bootstrap writes the repository variables (docs/new-repo.md),
@@ -42,7 +42,7 @@ jobs:
       - uses: moonrepo/setup-toolchain@261c62cb5b0f580c7be7c8cd0f023a2e96756095 # v0.6.4
         with:
           auto-install: true
-          # #212's own first three CI runs each failed a different moon task with the identical
+          # Early CI runs each failed a different moon task with the identical
           # `proto-shim: ... Permission denied (os error 13)` error, every time right after a
           # toolchain cache hit - the cache restore losing proto's shim executable bit, not the
           # task. Disabled until that's confirmed fixed upstream.
@@ -58,7 +58,7 @@ jobs:
           # superset, so an infrastructure/-only PR still plans every environment it reaches.
           MOON_BASE: origin/main
         run: |
-          # Left at the command's own defaults (no --upstream/--downstream): #206 deliberately
+          # Left at the command's own defaults (no --upstream/--downstream): the infra moon.yml files deliberately
           # modelled deploy-staging/deploy-prod's dependsOn on infra-env/deploy-root as
           # apply-ordering only, not an affectedness edge, so pulling in graph relations would mark
           # them affected via the wrong mechanism - the explicit project://infra-root /
@@ -78,9 +78,9 @@ jobs:
   #   inherited `terraform fmt -check` and `terraform validate` (.moon/tasks/terraform.yml);
   #   `:validate` is `runInCI: 'only'`, so this is the one place it runs at all.
   # - test: every project's tests (a shared package still reaches its dependents via each test
-  #   task's own `inputs`, e.g. `project://packages/protos`, #155) plus the image, so a broken
+  #   task's own `inputs`, e.g. `project://packages/protos`) plus the image, so a broken
   #   image build fails the PR rather than the job that publishes it.
-  # - protos-drift: packages/protos:drift (#194), `buf generate` re-run and diffed.
+  # - protos-drift: packages/protos:drift, `buf generate` re-run and diffed.
   moon:
     name: ${{ matrix.check }}
     strategy:

@@ -1,4 +1,4 @@
-# 20. Deploy decisions come from marker tasks
+# 13. Deploy decisions come from marker tasks
 
 Status: Accepted
 

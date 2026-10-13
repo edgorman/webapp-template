@@ -30,7 +30,7 @@ resource "google_firestore_database" "database" {
   type        = "FIRESTORE_NATIVE"
 
   # Every record the backend keeps lives here, and prod applies run with -auto-approve on promotion
-  # and rollback (#261), so nothing a plan proposes may delete it: prevent_destroy fails any plan
+  # and rollback, so nothing a plan proposes may delete it: prevent_destroy fails any plan
   # that would replace it, delete protection stops a delete outside Terraform, ABANDON leaves the
   # database in place if it is ever dropped from state, and PITR keeps 7 days to restore from.
   delete_protection_state           = "DELETE_PROTECTION_ENABLED"

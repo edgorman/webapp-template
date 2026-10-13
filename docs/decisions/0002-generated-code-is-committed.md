@@ -11,7 +11,7 @@ An entity shape declared once in Go and hand-copied into TypeScript has nothing 
 - `services/backend/internal/gen` and `services/frontend/src/gen` are committed, ordinary first-party source.
 - Generated code follows its consumer, not the contract it came from (the same rule as [1](0001-manifests-live-with-their-code.md)). `option go_package` points into `services/backend/internal/gen/...`; `buf.gen.yaml`'s `out:` puts the TypeScript into `services/frontend/src/gen`, not a shared `packages/node`.
 - The `protos-drift` check (`packages/protos:drift`) re-runs `buf generate` and fails on `git status --porcelain` over `packages/protos` and both `gen/` folders. Its `inputs` cover the `gen/` folders too, so a hand-edit to generated output is caught, not only a `.proto` edit. It depends on `services/frontend:install`, because the ts-proto plugin is resolved from `services/frontend/node_modules/.bin`.
-- `services/backend:test` and `services/frontend:test` list `project://packages/protos` as an input, so a `.proto`-only edit still marks both affected (see [19](0019-hand-declared-moon-graph.md)).
+- `services/backend:test` and `services/frontend:test` list `project://packages/protos` as an input, so a `.proto`-only edit still marks both affected (see [12](0012-hand-declared-moon-graph.md)).
 
 ## Consequences
 

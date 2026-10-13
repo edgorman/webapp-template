@@ -1,10 +1,10 @@
-# 24. A manual prod apply, for bootstrapping only
+# 17. A manual prod apply, for bootstrapping only
 
 Status: Accepted
 
 ## Context
 
-Staging applies on every merge, prod only on promotion, so prod state can lag `main`. A merge-time job that writes into every environment's store ([28](0028-per-environment-artifact-stores.md)) fails if the store is new and prod hasn't been promoted past the PR that added it.
+Staging applies on every merge, prod only on promotion, so prod state can lag `main`. A merge-time job that writes into every environment's store ([21](0021-per-environment-artifact-stores.md)) fails if the store is new and prod hasn't been promoted past the PR that added it.
 
 ## Decision
 

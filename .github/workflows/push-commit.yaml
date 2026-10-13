@@ -34,7 +34,7 @@ jobs:
         name: Calculate Next Version
         uses: Fresa/trunk-based-release-versioning@8b8150e3258028d42d7a8d30aec43491f5794d9e # v0.2.0
 
-  # #199: cutover - moon decides which Terraform deployment(s) an apply reaches, the same way
+  # moon decides which Terraform deployment(s) an apply reaches, the same way
   # pull-request.yaml's `changed` job decides which to plan (see its own comment for why the old
   # github-file-diff blanket glob has no replacement here). There is no services-frontend/
   # services-backend output here: those jobs below publish artifacts on every merge unconditionally
@@ -57,7 +57,7 @@ jobs:
         with:
           auto-install: true
           # See pull-request.yaml's identical `changed` step: every observed
-          # `proto-shim: ... Permission denied (os error 13)` failure across #209/#212's early CI
+          # `proto-shim: ... Permission denied (os error 13)` failure in early CI
           # runs happened right after a toolchain cache hit, on a different task each time - the
           # cache restore is the common thread, not the task. Disabled until that's fixed upstream.
           cache: false
@@ -67,7 +67,7 @@ jobs:
         run: |
           # Diffed against the last commit this workflow fully processed - the newest release tag
           # before this commit (pre-release only tags a commit once every publish job succeeded) -
-          # rather than `github.event.before` (#262). The concurrency group keeps at most one
+          # rather than `github.event.before`. The concurrency group keeps at most one
           # pending run and cancels the rest, so `before` can name a merge whose run never happened,
           # and that merge's infrastructure changes would never be applied. HEAD~1, not HEAD, so a
           # re-run of an already-tagged commit still sees its own changes. moon reads MOON_BASE the
@@ -240,7 +240,7 @@ jobs:
           workload_identity_provider: ${{ vars.WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ vars.SERVICE_ACCOUNT }}
 
-  # #277: the deployed frontend and backend together, signed out and read-only, against the live
+  # The deployed frontend and backend together, signed out and read-only, against the live
   # staging site - the defects that sit between components (config.json, CORS, the Pages worker,
   # routing) and so pass every unit test. services-frontend already waits on services-backend, so
   # this runs once both are live, and pre-release waits on it: a failing smoke test leaves this
@@ -271,7 +271,7 @@ jobs:
   # frontend folder behind it in both environments (the one failure promotion can't recover from:
   # nothing to deploy, nothing to roll back to).
   #
-  # `if:` explicitly checks only this job's own direct needs (#185). A bare `needs:` with no `if:`
+  # `if:` explicitly checks only this job's own direct needs. A bare `needs:` with no `if:`
   # looks equivalent - GitHub's default condition is "run only if every dependency succeeded" - but
   # GitHub's default success() check isn't limited to direct needs: it's defeated by a `skipped`
   # conclusion anywhere upstream in the needs graph, including two hops back through
@@ -281,7 +281,7 @@ jobs:
   # silently skipped on nearly every merge, while services-frontend had already written that merge's
   # speculative next version into staging's config.json - a version with no release ever cut for it.
   # always() opts out of that default short-circuit, matching the pattern services-frontend already
-  # uses above; the explicit `== 'success'` (not `'success' || 'skipped'`) keeps the fix #156 made -
+  # uses above; the explicit `== 'success'` (not `'success' || 'skipped'`) keeps an earlier fix -
   # no publish job has a benign skip path, so a skip of any of them here is still not tag-worthy.
   pre-release:
     needs: [services-backend, services-frontend, smoke, version]

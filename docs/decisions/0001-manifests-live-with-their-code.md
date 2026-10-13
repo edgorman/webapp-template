@@ -12,7 +12,7 @@ Each language's manifest lives in the directory that owns that language's code: 
 
 Shared Go code, when there is any, gets a second module beside the first (`packages/go`, consumed through a `require` paired with a relative `replace`) rather than one module hoisted to the root.
 
-`.moon/` and `.prototools` (#191) sit at the root anyway, as `pants.toml` once did. They configure the orchestrator that walks every other manifest rather than claiming an ecosystem of their own, so there is nothing for them to live beside.
+`.moon/` and `.prototools` sit at the root anyway. They configure the orchestrator that walks every other manifest rather than claiming an ecosystem of their own, so there is nothing for them to live beside.
 
 ## Consequences
 

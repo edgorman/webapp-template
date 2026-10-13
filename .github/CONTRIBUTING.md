@@ -1,6 +1,6 @@
 # Contributing
 
-This is a single-maintainer demo, not a product with a roadmap. Issues are welcome; pull requests should start from an issue, so open or comment on one first.
+This is a single-maintainer template, not a product with a roadmap. Issues are welcome; pull requests should start from an issue, so open or comment on one first.
 
 - **Issues**: use the [issue templates](ISSUE_TEMPLATE). Report security vulnerabilities through [`SECURITY.md`](SECURITY.md), never in a public issue.
 - **Getting started**: [`docs/start-here.md`](../docs/start-here.md) covers setup, running both services locally and opening a PR.
