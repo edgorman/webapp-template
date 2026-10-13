@@ -1,1 +1,1 @@
-bucket = "blog-gorman-club-prod-terraform-state"
+bucket = "myapp-prod-terraform-state"

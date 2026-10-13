@@ -38,5 +38,5 @@ resource "google_storage_bucket" "frontend" {
 resource "google_storage_bucket_iam_member" "frontend_github_actions_writer" {
   bucket = google_storage_bucket.frontend.name
   role   = "roles/storage.objectAdmin"
-  member = "serviceAccount:github-actions@blog-gorman-club-root.iam.gserviceaccount.com"
+  member = "serviceAccount:${var.ci_service_account}"
 }

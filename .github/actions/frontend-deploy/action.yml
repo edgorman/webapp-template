@@ -24,6 +24,14 @@ inputs:
     description: 'Environment name written into config.json - "staging" or "production" (see .github/AGENTS.md and issue #152). Omit to leave it out of config.json.'
     required: false
     default: ''
+  site_url:
+    description: 'Canonical (production) URL of the site, the PRODUCTION_URL repository variable on every environment, written into config.json for canonical links and the Pages worker. Omit to leave it out of config.json.'
+    required: false
+    default: ''
+  site_name:
+    description: 'Display name of the site (the SITE_NAME repository variable), written into config.json. Omit to leave it out of config.json.'
+    required: false
+    default: ''
 
 runs:
   using: "composite"
@@ -40,19 +48,24 @@ runs:
     # inputs are dropped (with_entries(select)) rather than written as "", matching how
     # src/lib/config.ts already treats a missing field and an empty one the same way.
     - name: Write Runtime Config
-      if: inputs.backend_url != '' || inputs.version != '' || inputs.environment != ''
       shell: bash
       env:
         BACKEND_URL: ${{ inputs.backend_url }}
         VERSION: ${{ inputs.version }}
         ENVIRONMENT: ${{ inputs.environment }}
+        SITE_URL: ${{ inputs.site_url }}
+        SITE_NAME: ${{ inputs.site_name }}
+        GITHUB_REPO: ${{ github.repository }}
         CONFIG_PATH: services/frontend/${{ inputs.dist_directory }}/config.json
       run: |
         jq -n \
           --arg backendUrl "$BACKEND_URL" \
           --arg version "$VERSION" \
           --arg environment "$ENVIRONMENT" \
-          '{backendUrl: $backendUrl, version: $version, environment: $environment} | with_entries(select(.value != ""))' \
+          --arg siteUrl "$SITE_URL" \
+          --arg siteName "$SITE_NAME" \
+          --arg githubRepo "$GITHUB_REPO" \
+          '{backendUrl: $backendUrl, version: $version, environment: $environment, siteUrl: $siteUrl, siteName: $siteName, githubRepo: $githubRepo} | with_entries(select(.value != ""))' \
           > "$CONFIG_PATH"
 
     # --branch=main is required: wrangler infers production vs. preview from GITHUB_REF_NAME, which

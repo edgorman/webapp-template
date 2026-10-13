@@ -1,7 +1,7 @@
 name: 'Apply Prod Infrastructure (Manual)'
 
 # This is an escape hatch, not the normal path. Prod infrastructure is meant to change through
-# Promote Release (`promote-release.yaml`), where a `terraform apply` on `blog-gorman-club-prod`
+# Promote Release (`promote-release.yaml`), where a `terraform apply` on `the prod project`
 # runs as step 1 of promoting a specific, already-reviewed pre-release - so infra always lands
 # alongside a deliberate decision to ship a commit, with the accumulated plan visible in that
 # pre-release's notes first. This workflow exists only to backfill a newly-added per-environment
@@ -15,7 +15,7 @@ on:
   workflow_dispatch:
     inputs:
       confirm:
-        description: 'Type "apply" to confirm: this runs terraform apply on blog-gorman-club-prod right now, outside of a release promotion.'
+        description: 'Type "apply" to confirm: this runs terraform apply on the prod project right now, outside of a release promotion.'
         required: true
 
 permissions:
@@ -29,6 +29,7 @@ concurrency:
 
 jobs:
   infrastructure-prod:
+    if: vars.WORKLOAD_IDENTITY_PROVIDER != ''
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -40,7 +41,7 @@ jobs:
           CONFIRM: ${{ inputs.confirm }}
         run: |
           if [ "$CONFIRM" != "apply" ]; then
-            echo "::error::Input 'confirm' must be exactly \"apply\" - refusing to run terraform apply on blog-gorman-club-prod. If you're not deliberately backfilling a new resource ahead of a promotion, use Promote Release instead."
+            echo "::error::Input 'confirm' must be exactly \"apply\" - refusing to run terraform apply on the prod project. If you're not deliberately backfilling a new resource ahead of a promotion, use Promote Release instead."
             exit 1
           fi
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -56,3 +57,4 @@ jobs:
           # One client ID, defined in infrastructure/root, serves every environment.
           secrets: |
             TF_VAR_google_client_id=${{ vars.GOOGLE_CLIENT_ID }}
+            TF_VAR_ci_service_account=${{ vars.SERVICE_ACCOUNT }}

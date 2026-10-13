@@ -40,6 +40,10 @@ jobs:
   # services-backend output here: those jobs below publish artifacts on every merge unconditionally
   # (see the comment on services-frontend), so nothing gates them.
   changed:
+    # Skipped until infrastructure/root's bootstrap writes the repository variables (docs/new-repo.md),
+    # so an un-bootstrapped repository - the template itself included - runs only the PR checks.
+    # Everything that deploys waits on this job, so skipping it skips them all.
+    if: vars.WORKLOAD_IDENTITY_PROVIDER != ''
     runs-on: ubuntu-latest
     outputs:
       infrastructure-root: ${{ steps.moon.outputs.root }}
@@ -107,7 +111,7 @@ jobs:
       - id: secrets
         uses: ./.github/actions/gcp-secret-manager
         with:
-          project_id: 'blog-gorman-club-root'
+          project_id: ${{ vars.GCP_ROOT_PROJECT }}
           workload_identity_provider: ${{ vars.WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ vars.SERVICE_ACCOUNT }}
           secrets_list: |
@@ -120,8 +124,8 @@ jobs:
         shell: bash
         run: |
           URL=$(gcloud run services describe backend-stag \
-            --region=europe-west1 \
-            --project=blog-gorman-club-stag \
+            --region=${{ vars.GCP_REGION }} \
+            --project=${{ vars.GCP_PROJECT_PREFIX }}-stag \
             --format='value(status.url)')
           test -n "$URL" || { echo '::error::backend-stag URL not found'; exit 1; }
           echo "backend_url=$URL" >> "$GITHUB_OUTPUT"
@@ -130,8 +134,8 @@ jobs:
           google_client_id: ${{ vars.GOOGLE_CLIENT_ID }}
       - uses: ./.github/actions/frontend-publish
         with:
-          gcp_project_id: 'blog-gorman-club-stag'
-          prod_project_id: 'blog-gorman-club-prod'
+          gcp_project_id: '${{ vars.GCP_PROJECT_PREFIX }}-stag'
+          prod_project_id: '${{ vars.GCP_PROJECT_PREFIX }}-prod'
           sha: ${{ github.sha }}
           workload_identity_provider: ${{ vars.WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ vars.SERVICE_ACCOUNT }}
@@ -145,6 +149,10 @@ jobs:
           # disagree about what tag this commit becomes.
           version: v${{ needs.version.outputs.version }}
           environment: 'staging'
+          # Production's URL on staging too: it is the canonical origin pages link to, so staging
+          # never competes with production in search results (see services/frontend/README.md).
+          site_url: ${{ vars.PRODUCTION_URL }}
+          site_name: ${{ vars.SITE_NAME }}
 
   infrastructure-root:
     needs: changed
@@ -158,7 +166,7 @@ jobs:
       - id: secrets
         uses: ./.github/actions/gcp-secret-manager
         with:
-          project_id: 'blog-gorman-club-root'
+          project_id: ${{ vars.GCP_ROOT_PROJECT }}
           workload_identity_provider: ${{ vars.WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ vars.SERVICE_ACCOUNT }}
           secrets_list: |
@@ -197,11 +205,12 @@ jobs:
           # One client ID, defined in infrastructure/root, serves every environment.
           secrets: |
             TF_VAR_google_client_id=${{ vars.GOOGLE_CLIENT_ID }}
+            TF_VAR_ci_service_account=${{ vars.SERVICE_ACCOUNT }}
 
   # Runs on every merge - not gated on the services-backend diff - so every commit on `main`, and
-  # therefore every release tag, has a commit-SHA image in both registries. One leg per image: the
-  # API and the worker, built from the same Dockerfile with CMD=<image>. Must still follow
-  # infrastructure-staging so the staging deploy target exists.
+  # therefore every release tag, has a commit-SHA image in both registries. One leg per image, built
+  # from the same Dockerfile with CMD=<image>; add a second binary under cmd/ by adding it here.
+  # Must still follow infrastructure-staging so the staging deploy target exists.
   services-backend:
     name: services-${{ matrix.image }}
     needs: [changed, infrastructure-staging]
@@ -213,7 +222,7 @@ jobs:
       # A failed build in one leg shouldn't cancel the other's staging deploy halfway through.
       fail-fast: false
       matrix:
-        image: [backend, worker]
+        image: [backend]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -222,9 +231,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: ./.github/actions/backend-deploy
         with:
-          gcp_project_id: 'blog-gorman-club-stag'
-          prod_project_id: 'blog-gorman-club-prod'
-          gcp_region: 'europe-west1'
+          gcp_project_id: '${{ vars.GCP_PROJECT_PREFIX }}-stag'
+          prod_project_id: '${{ vars.GCP_PROJECT_PREFIX }}-prod'
+          gcp_region: ${{ vars.GCP_REGION }}
           service_name: '${{ matrix.image }}-stag'
           image_name: ${{ matrix.image }}
           image_tag: ${{ github.sha }}
@@ -254,6 +263,8 @@ jobs:
       - run: npm ci
       - run: npx playwright install --with-deps chromium
       - run: npx playwright test
+        env:
+          SMOKE_BASE_URL: ${{ vars.STAGING_URL }}
 
   # Runs on every merge, since the pre-release isn't gated on what changed - it waits on the publish
   # jobs having actually published instead, so a tag never exists without a commit-SHA image and
@@ -314,6 +325,7 @@ jobs:
           # Same as every other prod plan/apply, or this plan shows GOOGLE_CLIENT_ID being blanked.
           secrets: |
             TF_VAR_google_client_id=${{ vars.GOOGLE_CLIENT_ID }}
+            TF_VAR_ci_service_account=${{ vars.SERVICE_ACCOUNT }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Write Release Notes

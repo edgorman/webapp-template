@@ -1,5 +1,5 @@
 variable "gcp_project_id" {
-  description = "The GCP project this environment's resources are created in (e.g. blog-gorman-club-stag)"
+  description = "The GCP project this environment's resources are created in (e.g. myapp-stag)"
   type        = string
 }
 
@@ -25,52 +25,15 @@ variable "backend_initial_image" {
   default     = "us-docker.pkg.dev/cloudrun/container/hello"
 }
 
+variable "ci_service_account" {
+  description = "Email of the CI service account infrastructure/root creates, granted what CI needs on this environment's resources. The workflows pass the SERVICE_ACCOUNT Actions variable."
+  type        = string
+}
+
 variable "google_client_id" {
   description = "Google OAuth 2.0 client ID the backend verifies ID tokens against. Defined once in infrastructure/root and passed in by CI as TF_VAR_google_client_id."
   type        = string
   default     = ""
-}
-
-variable "assistant_model" {
-  description = "Model id the writing assistant calls, e.g. gemini-3.8-flash. It must be a model the Gemini Enterprise Agent Platform serves in assistant_location - model ids come and go faster than this service is redeployed, so this is configuration rather than a constant in the backend. Empty disables the feature."
-  type        = string
-  default     = "gemini-3.8-flash"
-}
-
-variable "assistant_location" {
-  description = "Location the model is called in: a region such as europe-west1, or \"global\" for the multi-region endpoint. Model availability is regional, so this is what moves a deployment onto an endpoint that actually serves assistant_model."
-  type        = string
-  default     = "global"
-}
-
-variable "embedding_model" {
-  description = "Text-embedding model the worker embeds posts with, served by the Agent Platform's :predict method in embedding_location. Changing it re-embeds every post on the worker's next start, since vectors from different models are not comparable. Empty disables embeddings."
-  type        = string
-  default     = "gemini-embedding-001"
-}
-
-variable "embedding_location" {
-  description = "Location embedding_model is called in: a region such as europe-west1, or \"global\" for the multi-region endpoint."
-  type        = string
-  default     = "europe-west1"
-}
-
-variable "embedding_dimension" {
-  description = "Length of every post embedding, and of the vector index on the embeddings collection that must match it. At most 2048, Firestore's limit for an indexed vector. Changing it needs every embedding rewritten, which changing embedding_model alongside it does."
-  type        = number
-  default     = 768
-}
-
-variable "moderation_model" {
-  description = "Model id the worker classifies new comments with. A cheap, fast model is enough for a yes/no verdict; like assistant_model it must be served in moderation_location. Empty leaves comments unscreened."
-  type        = string
-  default     = "gemini-3.8-flash"
-}
-
-variable "moderation_location" {
-  description = "Location moderation_model is called in: a region, or \"global\" for the multi-region endpoint."
-  type        = string
-  default     = "global"
 }
 
 variable "alert_notification_emails" {
@@ -103,18 +66,6 @@ variable "alert_rate_limited_count_threshold" {
   default     = 20
 }
 
-variable "alert_assistant_turn_threshold" {
-  description = "How many writing assistant turns in an hour, across every caller, before alerting. Sized to one author working steadily with room to spare (the per-account rate limit refills a turn every 30 seconds, so a single caller could reach 120): more than this is several people at once, a scripted client, or a loop."
-  type        = number
-  default     = 60
-}
-
-variable "alert_assistant_error_count_threshold" {
-  description = "How many failed writing assistant turns in a five minute window before alerting. 0 alerts on the first one: a failed turn is a model call that was paid for or refused, and either is worth knowing about on a site this quiet."
-  type        = number
-  default     = 0
-}
-
 variable "backend_registry_keep_count" {
   description = "How many of the most recent Artifact Registry versions the backend repository keeps (each environment's own registry, since every merge writes to both - see Staging Deployments in .github/AGENTS.md); everything older is deleted by the repository's cleanup_policies. See the Artifact Stores section of infrastructure/AGENTS.md for how this number was chosen."
   type        = number
@@ -125,10 +76,4 @@ variable "frontend_retention_days" {
   description = "How many days a commit-SHA folder survives in the frontend bucket (each environment's own bucket, since every merge writes to both - see Staging Deployments in .github/AGENTS.md) before the bucket's lifecycle rule deletes it. See the Artifact Stores section of infrastructure/AGENTS.md for how this number was chosen."
   type        = number
   default     = 90
-}
-
-variable "worker_max_instances" {
-  description = "Upper bound on worker instances. Events arrive one per post write or new comment, so a handful is plenty, and a low bound caps what a retry storm can cost."
-  type        = number
-  default     = 3
 }
