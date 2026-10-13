@@ -128,23 +128,29 @@ resource "google_service_account_iam_member" "github_actions_wic" {
   member             = "principalSet://iam.googleapis.com/${google_iam_workload_identity_pool.github_pool.name}/attribute.repository/${var.github_repository_owner}/${var.github_repository_name}"
 }
 
-# Wired into Actions repository variables so workflows never hardcode them.
-resource "github_actions_variable" "workload_identity_provider" {
-  repository    = var.github_repository_name
-  variable_name = "WORKLOAD_IDENTITY_PROVIDER"
-  value         = google_iam_workload_identity_pool_provider.github_provider.name
+# Wired into Actions repository variables so workflows never hardcode them. Their presence is also
+# what turns on every deploy job: until this root's first apply writes them, the workflows run only
+# the PR checks (see the `changed` jobs).
+locals {
+  actions_variables = {
+    WORKLOAD_IDENTITY_PROVIDER = google_iam_workload_identity_pool_provider.github_provider.name
+    SERVICE_ACCOUNT            = google_service_account.github_actions.email
+    # One client ID for every environment: passed to infrastructure/env as TF_VAR_google_client_id
+    # and baked into the frontend build as VITE_GOOGLE_CLIENT_ID.
+    GOOGLE_CLIENT_ID   = var.google_client_id
+    GCP_ROOT_PROJECT   = var.gcp_provider_project_id
+    GCP_PROJECT_PREFIX = var.gcp_project_prefix
+    GCP_REGION         = var.gcp_provider_region
+    SITE_NAME          = var.site_name
+    STAGING_URL        = "https://${var.frontend_hostnames["stag"]}"
+    PRODUCTION_URL     = "https://${var.frontend_hostnames["prod"]}"
+  }
 }
 
-resource "github_actions_variable" "service_account" {
-  repository    = var.github_repository_name
-  variable_name = "SERVICE_ACCOUNT"
-  value         = google_service_account.github_actions.email
-}
+resource "github_actions_variable" "variables" {
+  for_each = local.actions_variables
 
-# One client ID for every environment: passed to infrastructure/env as TF_VAR_google_client_id and
-# baked into the frontend build as VITE_GOOGLE_CLIENT_ID.
-resource "github_actions_variable" "google_client_id" {
   repository    = var.github_repository_name
-  variable_name = "GOOGLE_CLIENT_ID"
-  value         = var.google_client_id
+  variable_name = each.key
+  value         = each.value
 }

@@ -29,7 +29,7 @@ resource "google_firestore_database" "database" {
   location_id = var.gcp_region
   type        = "FIRESTORE_NATIVE"
 
-  # Every post, comment and user lives here, and prod applies run with -auto-approve on promotion
+  # Every record the backend keeps lives here, and prod applies run with -auto-approve on promotion
   # and rollback (#261), so nothing a plan proposes may delete it: prevent_destroy fails any plan
   # that would replace it, delete protection stops a delete outside Terraform, ABANDON leaves the
   # database in place if it is ever dropped from state, and PITR keeps 7 days to restore from.
@@ -45,17 +45,14 @@ resource "google_firestore_database" "database" {
 # No security rules are deployed deliberately: the backend is the only client and decides access
 # itself, and with no ruleset released the client SDKs cannot reach the database at all.
 
-# BlogRepository.List (services/backend/internal/repository/firestore/blog.go) pages the "blogs"
-# collection ordered by createdAt, so it can walk a feed one page at a time instead of reading the
-# whole collection on every call. Filtering the general feed on any of the three ways a post is
-# readable is a Firestore OR query, which runs as one query per branch behind the scenes - and a
-# query combining a filter with `ORDER BY createdAt` on a different field needs a composite index
-# for that combination, one per branch. A profile feed's ownerId-only branch reuses the second of
-# these.
-resource "google_firestore_index" "blogs_by_visibility_and_created_at" {
+# NoteRepository.List (services/backend/internal/repository/firestore/note.go) pages the "notes"
+# collection ordered by createdAt. A signed-in caller's feed is a Firestore OR query (public, or
+# theirs), which runs as one query per branch, and each branch filters on a different field than it
+# orders by, so each needs a composite index. A new collection queried the same way needs the same.
+resource "google_firestore_index" "notes_by_visibility_and_created_at" {
   project    = var.gcp_project_id
   database   = google_firestore_database.database.name
-  collection = "blogs"
+  collection = "notes"
 
   fields {
     field_path = "visibility"
@@ -67,10 +64,10 @@ resource "google_firestore_index" "blogs_by_visibility_and_created_at" {
   }
 }
 
-resource "google_firestore_index" "blogs_by_owner_and_created_at" {
+resource "google_firestore_index" "notes_by_owner_and_created_at" {
   project    = var.gcp_project_id
   database   = google_firestore_database.database.name
-  collection = "blogs"
+  collection = "notes"
 
   fields {
     field_path = "ownerId"
@@ -79,130 +76,5 @@ resource "google_firestore_index" "blogs_by_owner_and_created_at" {
   fields {
     field_path = "createdAt"
     order      = "DESCENDING"
-  }
-}
-
-resource "google_firestore_index" "blogs_by_allowed_user_and_created_at" {
-  project    = var.gcp_project_id
-  database   = google_firestore_database.database.name
-  collection = "blogs"
-
-  fields {
-    field_path   = "allowedUserIds"
-    array_config = "CONTAINS"
-  }
-  fields {
-    field_path = "createdAt"
-    order      = "DESCENDING"
-  }
-}
-
-# Filtering the feed by tag (`GET /blogs?tag=...`) is an array-contains on "tags" ordered by
-# createdAt, and needs its own composite index for the same reason the three above do. It replaces
-# the readability OR rather than joining it - Firestore allows only one array-contains per query,
-# and the OR branch already spends it on allowedUserIds - so a tagged feed is filtered on the tag
-# here and on readability in Go, which is why there is no (visibility, tags) index beside these.
-resource "google_firestore_index" "blogs_by_tag_and_created_at" {
-  project    = var.gcp_project_id
-  database   = google_firestore_database.database.name
-  collection = "blogs"
-
-  fields {
-    field_path   = "tags"
-    array_config = "CONTAINS"
-  }
-  fields {
-    field_path = "createdAt"
-    order      = "DESCENDING"
-  }
-}
-
-# A profile feed narrowed to one tag (`?ownerId=...&tag=...`) filters on both at once, which is a
-# third combination rather than either of the two above.
-resource "google_firestore_index" "blogs_by_owner_tag_and_created_at" {
-  project    = var.gcp_project_id
-  database   = google_firestore_database.database.name
-  collection = "blogs"
-
-  fields {
-    field_path = "ownerId"
-    order      = "ASCENDING"
-  }
-  fields {
-    field_path   = "tags"
-    array_config = "CONTAINS"
-  }
-  fields {
-    field_path = "createdAt"
-    order      = "DESCENDING"
-  }
-}
-
-# Related posts (`GET /blogs/{slug}/related`) run FindNearest over the worker's embeddings/{slug}
-# documents, which needs a vector index on the field the vectors are stored in. Its dimension is
-# the same variable the worker asks the model for, so the two cannot drift apart.
-resource "google_firestore_index" "embeddings_by_vector" {
-  project    = var.gcp_project_id
-  database   = google_firestore_database.database.name
-  collection = "embeddings"
-
-  fields {
-    field_path = "__name__"
-    order      = "ASCENDING"
-  }
-  fields {
-    field_path = "embedding"
-    vector_config {
-      dimension = var.embedding_dimension
-      flat {}
-    }
-  }
-}
-
-# Erasing an account (`DELETE /users/me`) finds the account's comments and reactions on every post
-# with collection group queries on comments.authorId and reactions.uid. Firestore builds
-# single-field indexes for collection scope only, so each field gets a collection group index here;
-# the collection-scope ones are listed too because declaring a field's indexes replaces its defaults.
-resource "google_firestore_field" "comments_author_id" {
-  project    = var.gcp_project_id
-  database   = google_firestore_database.database.name
-  collection = "comments"
-  field      = "authorId"
-
-  index_config {
-    indexes {
-      order       = "ASCENDING"
-      query_scope = "COLLECTION"
-    }
-    indexes {
-      order       = "DESCENDING"
-      query_scope = "COLLECTION"
-    }
-    indexes {
-      order       = "ASCENDING"
-      query_scope = "COLLECTION_GROUP"
-    }
-  }
-}
-
-resource "google_firestore_field" "reactions_uid" {
-  project    = var.gcp_project_id
-  database   = google_firestore_database.database.name
-  collection = "reactions"
-  field      = "uid"
-
-  index_config {
-    indexes {
-      order       = "ASCENDING"
-      query_scope = "COLLECTION"
-    }
-    indexes {
-      order       = "DESCENDING"
-      query_scope = "COLLECTION"
-    }
-    indexes {
-      order       = "ASCENDING"
-      query_scope = "COLLECTION_GROUP"
-    }
   }
 }

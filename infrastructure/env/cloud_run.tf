@@ -11,28 +11,15 @@ resource "google_project_iam_member" "backend_runtime_datastore_user" {
   member  = "serviceAccount:${google_service_account.backend_runtime.email}"
 }
 
-# The writing assistant calls the model as this service account, which is the whole reason there is
-# no API key anywhere in this deployment: the credential is the runtime identity itself, minted by
-# the metadata server and short-lived, exactly as CI's is under WIF.
-#
-# The role id is still aiplatform.user - the product is now the Gemini Enterprise Agent Platform,
-# but role ids do not change when a product is renamed. It is the user role rather than the admin
-# one: the backend calls a published model and never creates, trains, or deploys one.
-resource "google_project_iam_member" "backend_runtime_agent_platform_user" {
-  project = var.gcp_project_id
-  role    = "roles/aiplatform.user"
-  member  = "serviceAccount:${google_service_account.backend_runtime.email}"
-}
-
 # CI needs actAs to attach this service account below; no role in github_cicd.tf covers it.
 resource "google_service_account_iam_member" "backend_runtime_actas" {
   service_account_id = google_service_account.backend_runtime.name
   role               = "roles/iam.serviceAccountUser"
-  member             = "serviceAccount:github-actions@blog-gorman-club-root.iam.gserviceaccount.com"
+  member             = "serviceAccount:${var.ci_service_account}"
 }
 
 resource "google_cloud_run_v2_service" "backend" {
-  depends_on = [google_project_service.run, google_project_service.agent_platform]
+  depends_on = [google_project_service.run]
 
   project  = var.gcp_project_id
   name     = "backend-${var.environment}"
@@ -66,41 +53,6 @@ resource "google_cloud_run_v2_service" "backend" {
       env {
         name  = "GOOGLE_CLIENT_ID"
         value = var.google_client_id
-      }
-
-      # The project the model is called through and billed to. It is passed rather than detected
-      # from the metadata server: Terraform already knows it, so a lookup would only be a way of
-      # being told something this file could have said.
-      env {
-        name  = "GCP_PROJECT_ID"
-        value = var.gcp_project_id
-      }
-
-      env {
-        name  = "ASSISTANT_MODEL"
-        value = var.assistant_model
-      }
-
-      env {
-        name  = "ASSISTANT_LOCATION"
-        value = var.assistant_location
-      }
-
-      # A search query is embedded with the same model and vector size the worker embeds posts
-      # with (worker.tf), since vectors from different models are not comparable.
-      env {
-        name  = "EMBEDDING_MODEL"
-        value = var.embedding_model
-      }
-
-      env {
-        name  = "EMBEDDING_LOCATION"
-        value = var.embedding_location
-      }
-
-      env {
-        name  = "EMBEDDING_DIMENSION"
-        value = tostring(var.embedding_dimension)
       }
     }
   }

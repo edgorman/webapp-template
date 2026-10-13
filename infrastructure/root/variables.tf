@@ -1,7 +1,6 @@
 variable "gcp_provider_project_id" {
-  description = "The id of the root GCP project"
+  description = "The id of the root GCP project, created by hand before the first apply (docs/new-repo.md)"
   type        = string
-  default     = "blog-gorman-club-root"
 }
 
 variable "gcp_provider_region" {
@@ -19,7 +18,6 @@ variable "gcp_provider_zone" {
 variable "gcp_project_prefix" {
   description = "The prefix used for the environment GCP project ids"
   type        = string
-  default     = "blog-gorman-club"
 }
 
 variable "gcp_projects" {
@@ -37,13 +35,11 @@ variable "github_provider_token" {
 variable "github_repository_owner" {
   description = "The owner of the GitHub repository"
   type        = string
-  default     = "edgorman"
 }
 
 variable "github_repository_name" {
   description = "The name of the GitHub repository"
   type        = string
-  default     = "blog.gorman.club"
 }
 
 variable "cloudflare_account_id" {
@@ -63,7 +59,17 @@ variable "google_client_id" {
   default     = ""
 }
 
-variable "google_site_verification" {
-  description = "Token from Google Search Console's DNS verification for the gorman.club Domain property (the part after `google-site-verification=`). Not a secret."
+variable "site_name" {
+  description = "Display name of the site, shown in page titles and link previews (the SITE_NAME Actions variable)"
   type        = string
+}
+
+variable "cloudflare_zone" {
+  description = "The Cloudflare zone (domain) the frontend hostnames live in, e.g. example.com"
+  type        = string
+}
+
+variable "frontend_hostnames" {
+  description = "Full hostname of each environment's frontend, inside cloudflare_zone, e.g. { stag = \"staging.example.com\", prod = \"example.com\" }"
+  type        = map(string)
 }
