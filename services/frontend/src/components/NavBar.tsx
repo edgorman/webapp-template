@@ -32,14 +32,13 @@ const UserIcon = () => (
 
 /** Sticky top bar: brand, theme toggle, and an account button that opens AccountPanel. */
 export function NavBar() {
-  const { user, profile, theme, toggleTheme } = useApp()
+  const { user, profile, theme, toggleTheme, config } = useApp()
   const [accountOpen, setAccountOpen] = useState(false)
 
   return (
     <nav className="nav">
-      <Link to="/" className="nav-brand" aria-label="blog, gorman club">
-        <span className="nav-brand-main" aria-hidden="true">blog</span>
-        <span className="nav-brand-sub" aria-hidden="true">gorman club</span>
+      <Link to="/" className="nav-brand">
+        <span className="nav-brand-main">{config.siteName}</span>
       </Link>
       <button
         type="button"

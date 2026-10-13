@@ -1,12 +1,12 @@
 # backend
 
-Go backend service for blog.gorman.club, packaged as a Docker container and
-deployed to GCP Cloud Run (see the repository root `AGENTS.md` for the full
-deployment architecture).
+Go API service, packaged as a Docker container and deployed to GCP Cloud Run (see the repository
+root `AGENTS.md` for the full deployment architecture). It ships with sign-in, profiles and one
+example resource, **notes**, to copy when adding your own.
 
-It implements the Debug Endpoint Contract: `/health` and `/debug` both
-return system status, a timestamp, the deployment environment, and the git
-commit SHA the running image was built from, as JSON:
+It implements the Debug Endpoint Contract: `/health` and `/debug` both return system status, a
+timestamp, the deployment environment, and the git commit SHA the running image was built from, as
+JSON:
 
 ```json
 {
@@ -17,6 +17,25 @@ commit SHA the running image was built from, as JSON:
 }
 ```
 
+## API
+
+| Route                    | Auth     | What                                                          |
+| ------------------------ | -------- | ------------------------------------------------------------- |
+| `GET /health`, `/debug`  | none     | The Debug Endpoint Contract above                             |
+| `GET /notes`             | optional | One page of the notes the caller may read, newest first       |
+| `GET /notes/{id}`        | optional | One note, if the caller may read it                           |
+| `POST /notes`            | required | Create a note owned by the caller                             |
+| `PUT /notes/{id}`        | required | Replace a note's title, body and visibility (owner only)      |
+| `DELETE /notes/{id}`     | required | Delete a note (owner only)                                    |
+| `GET /users/me`          | required | The caller's own profile                                      |
+| `PUT /users/me`          | required | Create or update it; a profile with no username is given one  |
+| `DELETE /users/me`       | required | Erase the account: its notes, then the profile                |
+| `GET /users/{username}`  | optional | Anybody's public profile                                      |
+
+Request and response bodies are the messages in `packages/protos/app/v1`, as protojson. Every
+non-2xx response is an `ErrorResponse`. `GET /notes` takes `limit` and `startAfter` (the
+`createdAt` of the last note on the previous page) and answers `hasMore`.
+
 ## Layout
 
 ```
@@ -24,542 +43,83 @@ cmd/backend/          Entrypoint: reads config, builds adapters, hands them to t
 internal/
   entity/             Domain types and their rules - no I/O, no HTTP, no persistence tags
   repository/         Interfaces for everything external, plus ErrNotFound
-    cache/            A short-TTL in-process cache decorating the Blog repository's anonymous listing
     devauth/          Development-token TokenVerifier for running locally (ENVIRONMENT=local only)
-    firestore/        Firestore implementations of the Blog, User, Chat, Comment and Reaction repositories
+    firestore/        Firestore implementations of the Note and User repositories
     google/           Google Identity Services implementation of TokenVerifier
-    gemini/           Gemini Enterprise Agent Platform implementation of Assistant
   service/            HTTP server: routes, middleware, and logic spanning more than one entity
 ```
 
 Dependencies point inward: `service` and `repository` both know `entity`, `entity` knows nothing
 else, and only `cmd/backend` knows which concrete adapters exist. Swapping Firestore for another
-store means adding a folder under `repository/` and changing one line in `cmd/backend`. `cache/`
-is not a store at all but a decorator over one, wired in the same place and by the same rule: it
-implements the interface it wraps, so it is enabled and disabled by that one line.
+store means adding a folder under `repository/` and changing one line in `cmd/backend`.
 
 Validation lives on the entities as setters (`SetUsername`, `SetVisibility`, ...) that trim,
 check, and only then apply, so a rejected value is never half-written. The HTTP layer decodes into
-a request struct holding only the client-settable fields and applies it through those setters -
+a request message holding only the client-settable fields and applies it through those setters -
 which is why `ownerId` and `createdAt` cannot be spoofed: they are not part of the request shape at
-all.
+all. `Validate` runs the same setters against a copy and additionally requires the server-set
+identity (`Note.OwnerID`, `User.ID`); repositories call it before every write.
 
-`Validate` runs those same setters against a copy and additionally requires the server-set identity
-(`Blog.OwnerID`, `User.ID`). Repositories call it before every write and return without touching
-the datastore if it fails, so the rules hold for any entity, however it was assembled.
-
-Entities carry `json` tags only. Firestore's field names live on separate document structs in
-`repository/firestore`, which also keeps the document body free of the ID that Firestore already
-stores as the document key.
+Firestore's field names live on separate document structs in `repository/firestore`, which also
+keeps the document body free of the id that Firestore already stores as the document key.
 
 ## Access control
 
-Every gate in this service is one question asked of one model
-(`internal/entity/access.go`), rather than a rule invented where it happened to
-be needed - which is what the assistant's email check used to be, bolted onto
-the config beside a post's own visibility rules.
+Every gate in this service is one question asked of one model (`internal/entity/access.go`):
 
-The model has three parts and no more:
+- A **resource** is a kind of thing the service holds (`user`, `note`).
+- An **action** is one thing that can be done to it: `read`, `create`, `update`, `delete` - the
+  same four verbs the routes are registered under.
+- An **access** mode is how wide the audience for that pair is: **public** (everybody, signed in
+  or not) or **private** (the owner alone).
 
-- A **resource** is a kind of thing the service holds (`user`, `blog`,
-  `comment`, `reaction`) or a feature it gates (`assistant`).
-- An **action** is one thing that can be done to it: `read`, `create`,
-  `update`, `delete` - the same four verbs the routes are registered under.
-- An **access** mode is how wide the audience for that pair is. There are three:
-  **public** (everybody, signed in or not), **private** (the owner alone), and
-  **whitelist** (the owner plus whoever was named beside them).
+The `policy` table declares a mode for every (resource, action) pair that exists. A pair it does
+not name carries no mode and is refused, so a feature added without a line in the table is closed
+rather than open. An entity turns the declared mode into a `Permission` narrowed to one thing (who
+owns it), and `Permission.Allows(uid)` answers. The zero uid is the anonymous caller and holds
+nothing but public access. There are deliberately no roles.
 
-The `policy` table declares a mode for every (resource, action) pair that
-exists, and is the one place to read to know what this service allows. A pair it
-does not name carries no mode at all and is refused, so a feature added without
-a line in the table is closed rather than open.
+A note's read audience is whatever the note says: `Note.Permission(ActionRead)` reads its
+`visibility` back as a mode, and anything but `public` reads as private, so an unknown value is
+closed rather than open.
 
-Asking is two steps and always the same two. An entity turns the declared mode
-into a `Permission` narrowed to one particular thing - who owns it, who was
-named on it - and `Permission.Allows(uid)` answers. The zero uid is the
-anonymous caller and holds nothing but public access however the rest of the
-permission is filled in: an ownerless thing must never make a signed-out request
-its owner, which is the one way this could have failed open.
+A refused read is a `404`, not a `403`: `requireNotePermission` (`internal/service/note.go`)
+answers a note the caller may not read exactly as it answers a missing one, so a refusal never
+confirms that a private note exists. Only once a note is visible does a failed write become a
+`403`.
 
-There are deliberately **no roles**. A role would be a name for a set of
-permissions, and every permission here is decided by who owns the thing or who
-was named on it - which a role sits between rather than answers. The one gate
-that is not about ownership, the assistant, is a whitelist whose membership is
-bought (below), and that is a lookup rather than a role too.
+## Adding a resource
 
-Several actions are declared private for a caller who could only ever be acting
-on their own: a profile is addressed as `/users/me`, a reaction is keyed by the
-reader who left it, and a post is created owned by whoever asked. Those are
-enforced by the address rather than by a check - the forbidden case is
-unreachable, not refused - and they are declared anyway, because a table that
-only listed the checks that happen would not say what the rules are.
+Copy the notes slice end to end:
 
-A post is the one resource whose read audience is not fixed by the table: it is
-whatever the post itself says. `Blog.Permission(ActionRead)` reads a post's
-`visibility` and `allowedUserIds` back as a mode - public is everybody, private
-is the owner, and naming readers is what widens private into a whitelist - so
-the three modes an author can choose between are exactly the three the model
-has. A stored post carrying a visibility this build does not recognise reads as
-private, which is the way round to get an unknown value wrong.
-
-Permissions compose by being asked in order rather than by growing a fourth
-mode. A comment's thread is readable by whoever may read the post above it: the
-post's read permission is asked first and a caller who fails it gets the post's
-own `404`, then the comment's own permission decides the rest.
-
-## Users and blogs
-
-Data lives in Firestore (`infrastructure/env/firestore.tf`). This service is
-the only client of that database: it authenticates with the Admin SDK, no
-Firestore security rules are deployed, and the browser never talks to
-Firestore directly. Access rules therefore live in Go and nowhere else:
-
-- **Reads** — `Blog.CanBeReadBy` - the post's own read permission, asked by its
-  most common name - is the single definition of who may see a post (public
-  posts for anyone, signed in or not; private ones for the owner or a uid in
-  `allowedUserIds`). `GET /blogs` applies it as a Firestore query so private
-  posts are never fetched; `GET /blogs/{slug}` applies it to the loaded
-  document. Both routes run `optionalAuth`: a signed-in caller's own private
-  and whitelisted posts are included, but no credential is required.
-- **Writes** — `requireBlogPermission` restricts updates and deletes to the
-  post's owner, and `createdAt`/`updatedAt` come from the server rather than a
-  spoofable client clock.
-
-A post's address is a slug taken from its own title - so unlike the random key a
-Firestore-assigned id would have been, it is guessable. `blogFromPath` and
-`requireReadableBlog` (`internal/service/blog.go`) answer every way of missing - a
-malformed slug, a slug nothing holds, and a post the caller is not allowed to read -
-with the same `404`. A `403` would tell a prober a private post exists at a path it
-merely guessed right; folding that case into "not found" is what keeps the guess from
-confirming anything. `requireBlogPermission` layers the action's own permission
-on top of readability: a caller who cannot read a post gets the masking `404`
-before ownership is even considered, and only a post they can see yields a `403`
-for not owning it - which discloses nothing they could not already see. Asking
-it for `read` therefore checks the same thing twice and answers `404` either
-way, which is all `requireReadableBlog` is.
-
-A post has no id of its own. It is addressed by a **slug** taken from its title
-(`Hello, world!` → `/blogs/hello-world`), and keyed in Firestore by that slug
-alone, so uniqueness is a property of the document key rather than something
-checked: `Create` (unlike `Set`) refuses to overwrite an existing document.
-Slugs are therefore unique *across every author*, which is what lets the author
-be left out of the address entirely - the second post under a title falls back
-to a suffixed slug (`hello-world-k3m9x`) whoever wrote it, drawn rather than
-counted up because only the write can decide whether one is free. A slug is
-assigned once and never revised, so retitling a post leaves every link to it
-working.
-
-A handful of slugs are reserved (`entity.reservedBlogSlugs`) because the
-frontend routes them elsewhere: `new` is its editor at `/post/new`, which
-outranks the `:slug` wildcard beside it, so a post there would be unreachable.
-A title that slugs to one takes the suffixed form straight away, and `SetSlug`
-refuses a reserved slug outright.
-
-### Finding a post
-
-The feed is reverse-chronological, which is the right default and a poor way to
-find one post among many, so `GET /blogs` takes two filters beside the `author`
-(a username) a profile feed uses. Both narrow the page and neither can widen it: each
-is applied on top of `Blog.CanBeReadBy`, so a private post cannot be surfaced by
-a search that names it exactly, and a stranger cannot use the search box to
-discover what somebody wrote.
-
-- **`tag`** — the topics a post is filed under. `entity.NormalizeTag` reduces
-  what an author typed to the one form a tag is stored, filtered, and linked
-  under (lowercase, one hyphen between words), so "Web Dev", "web dev" and
-  "WEB-DEV" are one tag rather than three that look alike; the same reduction is
-  applied to the query param, so a link may spell it however it likes. Unlike a
-  slug it keeps every script rather than only ASCII — a slug has to survive being
-  read off a screen and typed back in, a tag is only ever followed from a link a
-  post rendered. Tags carry no access meaning: a post's audience is `visibility`
-  and `allowedUserIds`, and nothing else.
-- **`q`** — a case-insensitive substring of a post's title or body. It is
-  deliberately not a search index: at this scale the alternative is a service to
-  run, pay for, and keep in step, and what a reader wants from a search box on a
-  personal blog is to find the post they half remember. Tags are not searched,
-  since they have an exact filter of their own.
-
-The two are applied in different places, and the reason is what Firestore can
-do. A tag becomes an `array-contains` filter on the query (with its own
-composite indexes in `infrastructure/env/firestore.tf`), *replacing* the
-readability OR the general feed uses — a query may hold only one
-`array-contains` clause and that OR already spends it on `allowedUserIds`.
-Replacing it is the right way round: a tag is far more selective than
-"readable", so the tag goes to the index and readability falls back to the
-same in-Go filtering the profile feed already relies on. A search term has no
-Firestore predicate at all, so it is applied as `List` walks, which means a term
-matching nothing walks the whole collection — bounded, paged, and the first
-thing to revisit if the collection outgrows it.
-
-Both filters are rechecked against the entity as the walk keeps each post, even
-where Firestore already applied them. The entity stays the definition and the
-query is an optimisation over it that may not silently disagree — the same
-argument that has `CanBeReadBy` rechecked on documents the OR query already
-filtered.
-
-### Caching the anonymous feed
-
-`GET /blogs` is the highest-traffic read here and the most repeated one: the
-landing feed is the same public data for every signed-out visitor, and without a
-cache each of them re-runs the same Firestore query. So the anonymous listing is
-cached in the memory of the serving process for 30 seconds
-(`internal/repository/cache`).
-
-It is a decorator over `repository.BlogRepository` rather than something the
-handler does, which keeps the whole of the caching in one file: the service, its
-handlers and its tests cannot tell whether a page came from Firestore or from
-memory, and `cmd/backend` is where it is turned on.
-
-What makes it safe is that **only the anonymous caller's pages are cached**. A
-page is whatever `Blog.CanBeReadBy` admits for one uid, so two callers may share
-an answer only if they share a uid — and the empty uid, which is not an account
-at all, is granted public posts and nothing else. Every anonymous caller
-therefore really is asking the same question. A signed-in caller's page carries
-their own private and whitelisted posts, so it is never stored and never served
-from the cache; there is no per-uid keying to get wrong because there are no
-per-uid entries. Filters do not widen this either: `author`, `tag`, `startAfter`,
-`limit` and `q` are all part of the key, so a narrowed page is its own entry
-rather than a variation on the feed.
-
-The cost is staleness, bounded two ways. A write through this repository drops
-every cached page at once — not the ones the written post appears in, since
-working out which those are means a second implementation of `List`'s filters,
-wrong in exactly the way that shows up as a stale feed — so an author who
-publishes sees their post in the feed immediately. That only holds within the
-process that served the write, though, so on more than one instance the TTL is
-the real guarantee: at most 30 seconds before a new post reaches the feed a
-stranger sees. A post fetched by slug is not cached at all, so a link to a brand
-new post always resolves.
-
-Two bounds keep it from being a lever. The entry count is capped, because `q` is
-free text and a caller sending a distinct term per request would otherwise grow
-the map for as long as it kept sending them; once full of live pages, new ones
-are simply not kept, which degrades to the uncached behaviour rather than to
-unbounded memory. The volume of Firestore reads such a caller can provoke is
-bounded by the rate limiter in front of the API rather than here — the cache is
-an optimisation, not a defence.
-
-Like the rate limiter's buckets, this lives in one process and so is a
-per-*instance* cache: N instances hold N copies, each expiring on its own
-schedule. That is the same thing to revisit before scaling out.
-
-Profiles are keyed by the owner's Google account ID, so there is no
-server-assigned ID to hand out and a profile is written with `PUT` rather than
-`POST`. That key is never a URL, though: a profile is addressed by its
-**username**, which is assigned at sign-up from two descriptive words and an
-animal (`calm-smiling-kestrel`) and may be changed later. Uniqueness is enforced
-by a `usernames/{lowercased}` collection whose document key *is* the constraint,
-claimed in the same transaction as the profile write - so two callers picking the
-same name cannot both succeed.
-
-A username is the whole of a public identity. There is deliberately no display
-name: one that could be set freely would let anyone present themselves under a
-name somebody else holds, which is exactly what making the unique handle the
-visible one prevents.
-
-Writes are addressed as `/users/me` and resolve the owner from the verified
-credential, so there is no id in the path to point at somebody else's profile -
-the forbidden case is unreachable rather than merely checked. `GET /users/me`
-exists because a client holds a credential, not a username, and is how it learns
-the name it was given.
-
-Because a post records its owner by uid, and a uid resolves to nothing over
-HTTP, blog responses carry an `authorUsername` resolved at read time - the only
-handle a client holds for the profile behind a post, and so what it links the
-author by. Publishing therefore assigns a profile to an author who somehow
-reached `POST /blogs` without one, since a post by an unnamed author would be
-attributed to nobody. It is empty only for a post written before that rule,
-whose owner still holds no profile.
-
-Every route below except `GET /blogs`, `GET /blogs/{slug}`,
-`GET /blogs/{slug}/comments`, `GET /blogs/{slug}/reactions` and
-`GET /users/{username}` requires a Google Sign-In credential — those five run
-`optionalAuth` instead of `requireAuth`, so an anonymous request is answered as
-far as public posts allow rather than rejected. A profile has nothing
-caller-specific to hide, so it is readable either way. A signed-in caller sends the ID token Google issued, plus a header
-naming the provider that issued it:
-
-```
-Authorization: Bearer <google-id-token>
-Authorization-Provider: google
-```
-
-`requireAuth` and `optionalAuth` (`internal/service/auth.go`) share the same
-verification: signature, expiry, audience (`GOOGLE_CLIENT_ID`) and issuer are
-checked against Google's public keys, and the resulting identity — id, email,
-name, all from the signed payload — goes into the request context. They differ
-only in how they treat a request with no `Authorization` header at all:
-`requireAuth` rejects it, `optionalAuth` lets it through as the zero identity,
-which `Blog.CanBeReadBy` already treats as seeing only public posts. Either
-way, nothing the client sends about itself is trusted, and a credential that
-*is* present but invalid is rejected the same way by both.
-
-Failures are distinguished so the cause is obvious from the status alone:
-
-| Status | Meaning                                                                 |
-| ------ | ------------------------------------------------------------------------ |
-| `401`  | A route that requires one got no credential, or one that failed verification. |
-| `400`  | Headers missing or malformed — the caller didn't ask properly.            |
-| `501`  | A provider this service doesn't implement.                                |
-| `500`  | `GOOGLE_CLIENT_ID` is unset, so the deployment can't verify anything.     |
-
-Adding another provider means extending `authProvider` and the switch in
-`requireAuth`, plus a new implementation of `repository.TokenVerifier` alongside
-`repository/google` - not restructuring the flow.
-
-| Method | Path          | Description                                                           |
-| ------ | ------------- | --------------------------------------------------------------------- |
-| GET    | `/blogs`      | List the blogs the caller may read, newest first. `author` narrows to one username's posts, `tag` to one topic and `q` to a search term, all on top of the same read rules. A post's `allowedUserIds` is sent to its owner alone, and no response but `/users/me` carries a uid. No credential required. |
-| GET    | `/blogs/{slug}` | Fetch a single blog. No credential required for a public one; a private one the caller may not read is a `404`, the same as a missing one. |
-| POST   | `/blogs`      | Create a blog. `ownerId` is always the caller, and the slug comes from the title, regardless of the body. |
-| PUT    | `/blogs/{slug}` | Replace a blog's fields. A post the caller may not read is a `404`; one they may read but do not own is a `403`. The slug does not move, even when the title changes. |
-| DELETE | `/blogs/{slug}` | Delete a blog. Same `404`/`403` split as `PUT`.            |
-| GET    | `/users/{username}` | Fetch a profile by username. No credential required. A 404 doubles as the availability check. |
-| GET    | `/users/me`   | Fetch your own profile, including the username you were assigned.      |
-| PUT    | `/users/me`   | Create or replace your own profile. An omitted `username` keeps the one you hold; a taken one is a `409`. |
-| DELETE | `/users/me`   | Delete your account: your posts (with their comments, reactions and chats), your comments and reactions elsewhere, then the profile, releasing its username. A retry after a failure finishes the job. |
-| GET    | `/blogs/{slug}/chat` | Fetch the assistant conversation about a post. A post nobody has discussed is an empty conversation, not a `404`. |
-| POST   | `/blogs/{slug}/chat` | Send the assistant a message. Applies whatever it edits to the post and answers with the exchange plus the post as it now stands. |
-| DELETE | `/blogs/{slug}/chat` | Throw the conversation away. The post, edits included, is untouched. |
-| GET    | `/blogs/{slug}/comments` | List the comments on a post, oldest first. No credential required for a public post; a post the caller may not read is the same `404` the post itself gives. |
-| POST   | `/blogs/{slug}/comments` | Comment on a post. `authorId` is always the caller, whatever the body says. |
-| DELETE | `/blogs/{slug}/comments/{id}` | Delete a comment. Its author or the post's owner may; anybody else who can read the post gets a `403`, and an id naming nothing is a `404`. |
-| GET    | `/blogs/{slug}/reactions` | Every reaction on the post and on its comments, as counts. No credential required for a public post. |
-| PUT    | `/blogs/{slug}/reactions/{emoji}` | React to the post. Idempotent, and answers with the post's counts as they now stand. |
-| DELETE | `/blogs/{slug}/reactions/{emoji}` | Take your reaction back. Idempotent in the same way. |
-| PUT    | `/blogs/{slug}/comments/{id}/reactions/{emoji}` | React to one comment. A comment that does not exist is a `404`. |
-| DELETE | `/blogs/{slug}/comments/{id}/reactions/{emoji}` | Take that reaction back. |
-
-### Response shape
-
-Successful responses return the resource itself (`201 Created` the first time
-a profile is `PUT`, `200 OK` thereafter; `204 No Content` for `DELETE`). Every non-2xx response is JSON of the same shape, so a client can
-parse success and failure the same way:
-
-```json
-{ "error": "blog not found" }
-```
-
-## Comments
-
-The `/blogs/{slug}/comments` routes are the readers' half of a post, and hang
-off it for the same reason the assistant chat does: a comment has no identity
-apart from the post it replies to, and no route could name one that a
-`/blogs/{slug}` route would not have resolved first. They are stored that way
-too — `blogs/{slug}/comments/{id}` — which keeps a thread a single-collection
-query that needs no composite index, and gives a comment an id that means
-nothing outside its post.
-
-- **Who may read one.** Exactly whoever may read the post: `ListComments` goes
-  through the same `requireReadableBlog` every other read does, so a private
-  post's thread is as private as the post, and a caller who cannot see one gets
-  the post's own `404` rather than an empty thread — which would itself admit
-  the post exists.
-- **Who may write one.** Any signed-in caller who may read the post, its author
-  included. Reading a thread never needs a credential; writing to one always
-  does, since a comment is signed by whoever left it, and an anonymous comment
-  would be attributable to nobody. A commenter with no profile is given one, for
-  the same reason publishing gives an author one: they are shown by username.
-- **Who may delete one.** `entity.Comment.Permission(ActionDelete, post)` is the
-  single definition, and it is a whitelist of exactly one name beside the
-  comment's author: the owner of the post it sits under. That second name is
-  what makes this moderation rather than only retraction — an author is
-  answerable for what appears beneath their post. There is deliberately no way
-  to *edit* a comment at all, by anyone, so moderating cannot become putting
-  words in somebody's mouth: a comment is written and removed, never rewritten.
-
-A comment is erased on delete rather than soft-deleted like a post. A post's
-absence would be a hole in the record; a comment being taken down has to
-actually remove what was said.
-
-The frontend renders a comment body as text rather than as markdown, unlike the
-post above it — the safe rendering of a stranger's input is the one with no
-syntax in it.
-
-## Reactions
-
-Readers react to a post and to the comments on it with an emoji, which is the
-lightest thing a reader can say. The rules follow the post, as comments' do: a
-reader who may read a post may see and add reactions to it and to its comments,
-and one who may not gets the post's own `404`.
-
-- **A fixed set of five, not any emoji.** `entity.AllowedEmojis` (👍 👎 ❤️ 😄
-  🎉) is the whole of what a reaction may be, and `entity.ValidEmoji` is exact
-  membership in it — not a shape check, so a composed variant of one of the
-  five (a skin tone, say) does not match the plain glyph it modifies. There is
-  no custom-emoji upload and no combining runes of your own. Widening the set
-  is a change to that one array on the backend and the matching array in the
-  frontend's `ReactionBar`, and nothing else.
-- **Addressed, not toggled.** `PUT` puts a reaction there and `DELETE` takes it
-  back, both idempotent, so a retried click or a stale page lands where it was
-  aiming rather than undoing itself. The client decides which to send from what
-  it last read; the server never flips. Both answer with the target's counts as
-  they now stand, since a bar is a shared number that one client's own click
-  cannot predict.
-- **Counted, not named.** A reaction is reported as an emoji, a count, and
-  whether *you* are in it. Who else reacted is deliberately not disclosed:
-  naming them would turn a one-click gesture into a public record of who liked
-  what, which is a heavier thing than the button suggests.
-
-One reader's reactions to one thing are stored as a single document keyed by
-that pair (`blogs/{slug}/reactions/{target}-{uid}`), so "this reader, this
-target" is unique by construction — the same argument that keys a post by its
-slug — and two readers reacting at once write different documents and never
-contend. A comment's reactions live beside the post's rather than beneath the
-comment, which is what makes a page one query instead of one per comment.
-A reader is bounded by `entity.AllowedEmojis` itself rather than by a separate
-limit — once all five are chosen there is nothing left to add, and none may
-repeat. How many readers may react is unbounded.
-
-Deleting a comment deletes its reactions too, so a moderated comment cannot
-survive as a row of numbers. That cleanup is best-effort and logged rather than
-returned: the caller asked for the comment to be gone, and it is.
+1. `packages/protos/app/v1/<thing>.proto`: the wire message, a page, and a request. Run `buf generate`.
+2. `internal/entity/<thing>.go`: the type, its setters, `Validate` and `Permission`, plus a
+   `Resource` constant and a line per action in `access.go`'s `policy` table.
+3. `internal/repository/<thing>.go`: the interface. `internal/repository/firestore/<thing>.go`:
+   the Firestore implementation, plus any composite index in `infrastructure/env/firestore.tf`.
+4. `internal/service/<thing>.go`: the handlers, registered in `service.go`'s `Handler`.
+5. If accounts own it, erase it in `DeleteUser` (`internal/service/user.go`).
 
 ## Rate limiting
 
 Every request is metered by a token bucket before it reaches a handler
-(`internal/service/ratelimit.go`). Three budgets apply, outermost first:
+(`internal/service/ratelimit.go`). Two budgets apply, outermost first:
 
-| Budget       | Keyed on                    | Allowance                      | Covers                                            |
-| ------------ | --------------------------- | ------------------------------ | ------------------------------------------------- |
-| Per client   | client address              | 60 at once, +1 per second      | every route, signed in or not                     |
-| Per account  | the uid in a verified token | 20 at once, +1 per 3 seconds   | every route behind `requireAuth` - so every write |
-| Assistant    | the uid in a verified token | 5 at once, +1 per 30 seconds   | `POST /blogs/{slug}/chat`                         |
+| Budget      | Keyed on                    | Allowance                    | Covers                                            |
+| ----------- | --------------------------- | ---------------------------- | ------------------------------------------------- |
+| Per client  | client address              | 60 at once, +1 per second    | every route, signed in or not                     |
+| Per account | the uid in a verified token | 20 at once, +1 per 3 seconds | every route behind `requireAuth` - so every write |
 
-They are layered rather than alternatives, because each answers a question the
-others cannot. Only the address is known before a credential has been checked,
-so it is the only thing that can bound an anonymous flood - including one aimed
-at the token verifier itself, which is not free. Only the account survives a
-caller changing address, so it is the only thing that can bound somebody who
-signed in. And the assistant needs a budget far below either, because a chat
-turn is the one request here that calls a paid model and can hold a connection
-open for two minutes: an allowance that is generous for editing a post is
-ruinous for it.
+Only the address is known before a credential has been checked, so it is the only thing that can
+bound an anonymous flood; only the account survives a caller changing address. A route that calls
+something expensive gets a tighter budget of its own, wrapped inside `authed` the same way.
 
-The client address is the **rightmost** `X-Forwarded-For` entry, not the
-leftmost one usually wanted for logging. Anything to the left of it is whatever
-the client chose to send - Cloud Run appends the address it saw rather than
-replacing the header - so metering the leftmost entry would let a caller dodge
-the limit with a random header per request. Putting a proxy in front of the
-service would shift the real client one entry to the left and collapse everyone
-into one bucket: over-limiting rather than under-limiting, which is the way
-round to get this wrong.
+The client address is the **rightmost** `X-Forwarded-For` entry: anything to the left of it is
+whatever the client chose to send, so metering the leftmost entry would let a caller dodge the
+limit with a random header per request. A refused request is a `429` with a `Retry-After` header.
 
-A refused request is a `429` carrying the usual JSON error body and a
-`Retry-After` header. The wait is repeated in the message because a browser
-cannot read a header this API does not expose to it, and the whole of what an
-author needs to know is when to try again.
-
-Buckets live in the memory of one process, so these are per-*instance*
-budgets: a service running on N instances admits N times the numbers above,
-and a caller whose requests land on different instances is metered separately
-on each. That is fine while this deployment runs as a single instance, and it
-is the thing to revisit before scaling out - the counters would have to move to
-a store the instances share (Firestore, Redis), which is contained to
-`rateLimiter` since nothing outside that file knows where a bucket lives.
-Buckets that have refilled to full are dropped as they are passed, a minute at
-a time: a full bucket admits exactly what an unknown key admits, so forgetting
-it changes nothing, and the map stays bounded by active keys rather than by
-every address ever seen.
-
-## The writing assistant
-
-The `/blogs/{slug}/chat` routes let an author talk to Gemini about a post and
-have it make the changes itself, rather than handing back text to paste. Three
-things are worth knowing about how it is bounded:
-
-- **What it can touch.** The model is given three tools - `set_title`,
-  `set_content`, `replace_text` - and they operate on an `entity.Draft`, which
-  is a post's title and body and nothing else. Visibility, the private-post
-  whitelist, the owner, and the slug are not reachable from any tool, so the
-  worst a misbehaving model can do is write a bad post: it cannot publish a
-  private one, reassign it, or touch a post other than the one being discussed.
-  Nothing behind `repository.Assistant` writes at all - the adapter edits a copy
-  and hands it back, and `service` decides whether to persist it.
-- **Who may use it.** `entity.AssistantEntitlement` is the whitelist the access
-  model gates it with, and the one whitelist here whose membership is not a
-  field on a document: it is worked out per request from what the account has.
-  An account is entitled while its subscription has not run out
-  (`User.SubscribedUntil`) and no other way. There is no configured list of
-  addresses to be on, so granting access is writing that field and revoking it
-  is clearing it - neither needs a deploy, which is exactly what an allowlist in
-  the environment could not offer.
-
-  The subscription is keyed on the account rather than on anything the caller
-  says about itself: the profile is loaded by the uid in the verified token, so
-  nothing a request asserts is consulted. That is also why nothing here has to
-  care whether an address was verified - an earlier version of this list named
-  email addresses and had to, since an address an account merely claimed would
-  otherwise have matched one.
-
-  The entitlement answers in the same shape as every other permission - a
-  whitelist holding exactly one name, the account's own, when it is entitled
-  and nobody at all when it is not - so "may I use the assistant" is the same
-  kind of question as "may I read this post", asked the same way. All three chat
-  routes cost it: a transcript is as much a paid artifact as the turn that
-  produced it. `GET /users/me` reports the answer as `assistantEnabled` (and the
-  account's own `subscribedUntil` beside it), so a client can keep the panel off
-  the screen for an account that would be refused; the routes enforce it either
-  way, and a public profile never discloses either field.
-
-  A deployment with no model configured is the zero entitlement: nobody is
-  entitled, whatever anyone paid, because there is nothing for an entitlement to
-  buy. Note that `SubscribedUntil` lives on the profile, so deleting a profile
-  drops the subscription with it - which is fine while the field is set by hand,
-  and is the first thing to settle when a checkout writes it (either by refusing
-  to delete a profile with live paid access, or by storing the subscription
-  beside the profile rather than in it).
-- **What the draft is.** A chat request carries the title and body the author
-  has on screen, unsaved changes included - asking to tighten a paragraph has to
-  mean the paragraph they can see, not the one last written to Firestore. The
-  post is written back only when the model actually edited it, and the response
-  says so (`updated`), so an author who only asked a question keeps their
-  unsaved work unsaved.
-
-Conversations are stored in Firestore under `chats/{slug}`, keyed exactly as the
-post is. The turns live in an array inside that one document rather than in a
-subcollection: a chat is only ever read whole, since the model is given the
-whole history each turn. That trades unbounded growth for simplicity, which is
-why `entity.MaxChatMessages` trims the oldest turns rather than failing a write.
-
-The model is reached through the **Gemini Enterprise Agent Platform** - the
-product formerly called Vertex AI, whose API is still served at
-`aiplatform.googleapis.com` and whose discovery document now titles itself
-"Agent Platform API". The backend sends a bearer token from Application Default
-Credentials - on Cloud Run, its own runtime service account, holding
-`roles/aiplatform.user` - so there is no long-lived credential to mint, store,
-rotate, or leak, the same argument that put GitHub Actions on Workload Identity
-Federation. Credentials are resolved on first use, so a backend started without
-them still serves every other route and fails only this one, with the reason.
-
-It is deliberately **not** the Gemini API (`generativelanguage.googleapis.com`),
-and the reason is worth recording because it is not obvious: that API's
-`generateContent` declares no OAuth scope at all in its discovery document, so
-it takes an API key and nothing else. A service-account token sent to it is
-refused with a `403`. This platform's `generateContent` does declare the
-`cloud-platform` scope, which is what makes key-free authentication possible
-here. Using the Gemini API instead would mean adding the one long-lived secret
-this deployment is built to avoid.
-
-When a call does fail, the adapter logs the provider's machine-readable `status`,
-the `details[].reason` a denial carries (`PERMISSION_DENIED`,
-`ACCESS_TOKEN_SCOPE_INSUFFICIENT`, `SERVICE_DISABLED`, ...), and the
-`fieldViolations[].field` paths a rejected request carries. It never logs the
-human-readable message, which can quote the request back, and the request holds
-the post. A bare status code cannot tell an operator whether a deployment is
-missing a role, a scope, an enabled API, or a well-formed request; those three
-can.
-
-One consequence of talking to a thinking model is worth knowing about. A turn
-that has to be replayed into the conversation - which is every turn that makes a
-tool call, since the call has to be in the transcript before its result can
-answer it - is sent back as the exact bytes it arrived as, not re-encoded from
-the fields `part` models. A thinking model returns parts this package has no
-field for (`thought`, `thoughtSignature`, "an opaque signature for the thought so
-it can be reused in subsequent requests"), and paraphrasing such a part through
-a narrower struct turns it into `{}`, which the API rejects. The rule is
-therefore not to model more fields but to stop paraphrasing what the model
-said.
+Buckets live in the memory of one process, so these are per-*instance* budgets: revisit them before
+running more than one instance.
 
 ## Development
 
@@ -570,7 +130,7 @@ go test ./... -cover                   # test
 go build -o bin/backend ./cmd/backend  # build
 ```
 
-`go run ./cmd/backend` starts the server directly on `:8080`. CI runs the same checks via moon (`lint-check`'s `moon ci :format :vet :build` and `test`'s `moon ci :test`, see .github/AGENTS.md's "Building with moon").
+CI runs the same checks via moon (see `.github/AGENTS.md`'s "Building with moon").
 
 ### Running locally
 
@@ -584,49 +144,41 @@ gcloud emulators firestore start --host-port=127.0.0.1:8081   # terminal 1
 moon run services/backend:dev-local                            # terminal 2, serves :8080
 ```
 
-Then sign in with `Authorization: Bearer dev` and `Authorization-Provider: google` (the
-development verifier stands in for Google's); `Bearer dev:<uid>` signs in as another account, for
-trying a whitelisted post or someone else's comment:
+Then sign in with `Authorization: Bearer dev` and `Authorization-Provider: google` (the development
+verifier stands in for Google's); `Bearer dev:<uid>` signs in as another account:
 
 ```sh
 auth=(-H 'Authorization: Bearer dev' -H 'Authorization-Provider: google' -H 'Content-Type: application/json')
 curl "${auth[@]}" -X PUT -d '{"username":"dev"}' localhost:8080/users/me
-curl "${auth[@]}" -X POST -d '{"title":"Hello","content":"First post","visibility":"public"}' localhost:8080/blogs
-curl localhost:8080/blogs
+curl "${auth[@]}" -X POST -d '{"title":"Hello","body":"First note","visibility":"public"}' localhost:8080/notes
+curl localhost:8080/notes
 ```
 
-The emulator keeps data in memory, so restarting it starts empty. With no model configured the
-writing assistant is disabled and search is the substring scan, as in any deployment without
-them. `DEV_AUTH=true` is what enables the development token, and `cmd/backend` refuses to start
-with it unless `ENVIRONMENT=local`, so no deployed environment can accept it.
+The emulator keeps data in memory, so restarting it starts empty. `DEV_AUTH=true` is what enables
+the development token, and `cmd/backend` refuses to start with it unless `ENVIRONMENT=local`.
 
 ### Firestore adapter tests
 
 `internal/repository/firestore` has tests that run against the emulator and skip without it, so
-`go test ./...` passes either way. CI's `test` job starts the emulator for them. To run them
-locally, with the emulator from above running:
+`go test ./...` passes either way. CI's `test` job starts the emulator for them. Locally, with the
+emulator from above running:
 
 ```sh
 FIRESTORE_EMULATOR_HOST=127.0.0.1:8081 go test ./internal/repository/firestore -cover
 ```
 
-Each test uses a project of its own, so they need no cleanup and don't see `dev-local`'s data.
-The emulator doesn't enforce composite indexes, so a query missing one still only fails in
-staging.
+The emulator doesn't enforce composite indexes, so a query missing one still only fails in staging.
 
 ## Configuration
 
 | Env var               | Description                                                                 |
-| ---------------------- | ---------------------------------------------------------------------------- |
-| `PORT`                 | Port to listen on. Defaults to `8080` (Cloud Run sets this itself).        |
-| `ENVIRONMENT`          | Deployment environment reported by `/debug` (e.g. `stag`, `prod`). Defaults to `development`. |
-| `DEV_AUTH`             | `true` accepts the development token instead of Google ID tokens (see Running locally). Refused unless `ENVIRONMENT=local`. |
-| `CORS_ALLOWED_ORIGIN`  | Origin allowed to call this API from a browser (the frontend's URL). Unset disables CORS headers entirely. |
-| `GOOGLE_CLIENT_ID`     | OAuth 2.0 client ID that ID tokens must be minted for. Set by Terraform from the `GOOGLE_CLIENT_ID` GitHub Actions variable; unset means no request can authenticate. |
-| `GCP_PROJECT_ID`       | Project the model is called through and billed to. Unset disables the writing assistant. |
-| `ASSISTANT_MODEL`      | Model id, e.g. `gemini-3.8-flash`. It has to be one the platform serves in `ASSISTANT_LOCATION`. Unset disables the writing assistant. |
-| `ASSISTANT_LOCATION`   | Location the model is called in: a region such as `europe-west1`, or `global` for the multi-region endpoint. Defaults to `global`. |
+| --------------------- | --------------------------------------------------------------------------- |
+| `PORT`                | Port to listen on. Defaults to `8080` (Cloud Run sets this itself).         |
+| `ENVIRONMENT`         | Deployment environment reported by `/debug` (e.g. `stag`, `prod`). Defaults to `development`. |
+| `DEV_AUTH`            | `true` accepts the development token instead of Google ID tokens. Refused unless `ENVIRONMENT=local`. |
+| `CORS_ALLOWED_ORIGIN` | Origin allowed to call this API from a browser (the frontend's URL). Unset disables CORS headers entirely. |
+| `GOOGLE_CLIENT_ID`    | OAuth 2.0 client ID that ID tokens must be minted for. Set by Terraform from the `GOOGLE_CLIENT_ID` GitHub Actions variable; unset means no request can authenticate. |
 
 `commit` is not an env var — it's baked into the binary at build time via
-`-ldflags "-X main.commit=..."` (see `Dockerfile`), since the same image is
-promoted unmodified from staging to production.
+`-ldflags "-X main.commit=..."` (see `Dockerfile`), since the same image is promoted unmodified
+from staging to production.

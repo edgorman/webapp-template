@@ -1,0 +1,17 @@
+syntax = "proto3";
+
+package app.v1;
+
+option go_package = "github.com/edgorman/webapp-template/services/backend/internal/gen/app/v1;appv1";
+
+// ErrorResponse is the body of every non-2xx response (internal/service/respond.go's writeError),
+// unlike every other message here which belongs to one resource: every handler answers a failure
+// the same way regardless of what it was doing, so there is one envelope rather than one per
+// resource, and api.ts reads it the same way it reads any other generated type.
+//
+// entity.ValidationError (the {field, message} pair a rejected write carries internally) is not
+// modeled here: writeValidationError collapses it to a single string before it reaches this
+// message, so the wire has only one shape.
+message ErrorResponse {
+  string error = 1;
+}

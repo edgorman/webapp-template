@@ -8,8 +8,8 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/edgorman/blog.gorman.club/services/backend/internal/entity"
-	"github.com/edgorman/blog.gorman.club/services/backend/internal/repository"
+	"github.com/edgorman/webapp-template/services/backend/internal/entity"
+	"github.com/edgorman/webapp-template/services/backend/internal/repository"
 )
 
 // Token is the development token. "dev:<uid>" signs in as another account, so access rules that

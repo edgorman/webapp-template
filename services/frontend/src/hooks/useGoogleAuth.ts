@@ -14,7 +14,7 @@ import type { GoogleCredentialResponse } from '../types/google'
 
 const SCRIPT_ELEMENT_ID = 'google-identity-services'
 const AUTH_PROVIDER = 'google'
-const STORAGE_KEY = 'blog.gorman.club:google-credential'
+const STORAGE_KEY = 'app:google-credential'
 
 export interface GoogleUser {
   id: string

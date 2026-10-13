@@ -2,6 +2,7 @@ import { render } from '@testing-library/react'
 import type { ReactElement } from 'react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { AppContext, type AppContextValue } from './context/AppContext'
+import type { Note } from './lib/api'
 
 export function fakeAppContext(overrides: Partial<AppContextValue> = {}): AppContextValue {
   return {
@@ -14,7 +15,8 @@ export function fakeAppContext(overrides: Partial<AppContextValue> = {}): AppCon
     theme: 'light',
     toggleTheme: () => {},
     profile: null,
-    refreshProfile: () => {},
+    setProfile: () => {},
+    config: { siteUrl: 'https://app.example.com', siteName: 'Example App' },
     ...overrides,
   }
 }
@@ -38,4 +40,18 @@ export function renderWithApp(ui: ReactElement, { context, route = '/', path = r
       </AppContext.Provider>
     </MemoryRouter>,
   )
+}
+
+/** A public note with every field filled in, for a test to override what it cares about. */
+export function note(overrides: Partial<Note> = {}): Note {
+  return {
+    id: 'note1',
+    authorUsername: 'calm-smiling-kestrel',
+    title: 'Untitled',
+    body: 'hello',
+    visibility: 'public',
+    createdAt: '2026-08-01T00:00:00Z',
+    updatedAt: '2026-08-01T00:00:00Z',
+    ...overrides,
+  }
 }

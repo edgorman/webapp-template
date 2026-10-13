@@ -1,6 +1,7 @@
 import { createContext, useContext } from 'react'
 import type { GoogleUser } from '../hooks/useGoogleAuth'
 import type { Api, CurrentUser } from '../lib/api'
+import type { RuntimeConfig } from '../lib/config'
 import type { Theme } from '../lib/theme'
 
 export interface AppContextValue {
@@ -13,24 +14,19 @@ export interface AppContextValue {
   theme: Theme
   toggleTheme: () => void
   /**
-   * The signed-in caller's own profile (GET /users/me), or null when signed out, before it loads,
-   * or when they have not set one up yet. It is how the app learns its own username: the Google
-   * identity carries only a sub, which is no longer addressable.
+   * The signed-in caller's own profile (GET /users/me), or null when signed out or before it
+   * loads. It is how the app learns its own username: the Google identity carries only a sub,
+   * which is never addressable.
    *
-   * Post authors do not come from here - a post carries its own username, and no uid to resolve
-   * one from. Comparing this profile's username with it is how the app tells its own posts (see
-   * api.ts's isAuthor).
-   *
-   * It carries what this account may do as well as who they are (`assistantEnabled`), which is why
-   * it is the caller's own profile type rather than the public one.
+   * Note authors do not come from here - a note carries its own username. Comparing this
+   * profile's username with it is how the app tells its own notes (see api.ts's isAuthor).
    */
   profile: CurrentUser | null
-  /** Re-reads `profile`, for after an edit that may have changed the username. */
-  refreshProfile: () => void
-  /** This build's release tag and 'staging'/'production' (see lib/config.ts), shown in
-   * AccountPanel's footer. Undefined in local dev, which has no config.json. */
-  version?: string
-  environment?: string
+  /** Replaces `profile` after an edit, such as a rename, that answered with the new one. */
+  setProfile: (profile: CurrentUser) => void
+  /** This deployment's runtime configuration (see lib/config.ts): the site's name and public URL,
+   * this build's release tag, 'staging'/'production', and the GitHub repository. */
+  config: RuntimeConfig
 }
 
 // Exported so tests can render `<AppContext.Provider value={...}>` with a fake value instead of

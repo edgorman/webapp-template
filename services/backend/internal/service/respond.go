@@ -10,8 +10,8 @@ import (
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/edgorman/blog.gorman.club/services/backend/internal/entity"
-	blogv1 "github.com/edgorman/blog.gorman.club/services/backend/internal/gen/blog/v1"
+	"github.com/edgorman/webapp-template/services/backend/internal/entity"
+	appv1 "github.com/edgorman/webapp-template/services/backend/internal/gen/app/v1"
 )
 
 // protoJSON is how every generated message reaches the wire. The options are the whole of the
@@ -19,11 +19,10 @@ import (
 // per call site:
 //
 //   - EmitDefaultValues keeps a zero-valued scalar in the body. protojson drops one by default,
-//     which would silently turn `"assistantEnabled": false` into an absent field and a client's
-//     `undefined`. Its narrower cousin EmitUnpopulated would go further and emit `null` for unset
-//     message fields too, which would start sending `"subscribedUntil": null` where the field is
-//     absent today - a change with no upside, so this is the one that matches encoding/json most
-//     closely.
+//     which would silently turn `"hasMore": false` into an absent field and a client's
+//     `undefined`. Its cousin EmitUnpopulated would go further and emit `null` for unset message
+//     fields too, which a client would then have to tell apart from absent - so this is the one
+//     that matches encoding/json most closely.
 //   - UseProtoNames stays off (the default), so field names are lowerCamelCase on the wire -
 //     `createdAt`, not `created_at` - which is what the hand-written `json` tags already produced
 //     and what the frontend already reads.
@@ -67,8 +66,8 @@ func writeProto(w http.ResponseWriter, status int, message proto.Message) {
 // is also what makes an additive proto change safe to deploy before the client that sends it.
 var protoJSONUnmarshal = protojson.UnmarshalOptions{DiscardUnknown: true}
 
-// maxRequestBody caps every body readProto reads. The largest legitimate one is a post at
-// entity.MaxContentLength runes, which even at the 6 bytes a JSON-escaped control character takes
+// maxRequestBody caps every body readProto reads. The largest legitimate one is a note at
+// entity.MaxBodyLength runes, which even at the 6 bytes a JSON-escaped control character takes
 // stays well under this.
 const maxRequestBody = 1 << 20
 
@@ -100,11 +99,11 @@ func writeJSON(w http.ResponseWriter, status int, body any) {
 	_ = json.NewEncoder(w).Encode(body)
 }
 
-// writeError answers with the wire's one error envelope (blogv1.ErrorResponse, #173), shared
+// writeError answers with the wire's one error envelope (appv1.ErrorResponse), shared
 // across every resource rather than declared per one: every handler fails the same way regardless
 // of what it was doing, so there is exactly one shape to keep in sync with api.ts's own read of it.
 func writeError(w http.ResponseWriter, status int, message string) {
-	writeProto(w, status, &blogv1.ErrorResponse{Error: message})
+	writeProto(w, status, &appv1.ErrorResponse{Error: message})
 }
 
 // writeValidationError reports a failed entity rule as a 400 carrying the field and reason.

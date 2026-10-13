@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-const testOrigin = "https://blog.gorman.club"
+const testOrigin = "https://app.example.com"
 
 func TestWithCORS_NoOriginConfigured(t *testing.T) {
 	called := false
@@ -56,12 +56,10 @@ func TestWithCORS_Preflight(t *testing.T) {
 // Routes are registered under a specific method, so ServeMux 405s an OPTIONS preflight before any
 // per-route wrapper runs - withCORS must wrap the whole mux to intercept it first.
 func TestHandler_PreflightAgainstMethodSpecificMux(t *testing.T) {
-	s := New(Config{AllowedOrigin: testOrigin}, newFakeBlogRepository(), newFakeUserRepository(),
-		newFakeChatRepository(), newFakeCommentRepository(), newFakeReactionRepository(), newFakeEmbeddingRepository(),
-		fakeVerifier{uid: "caller"}, &fakeAssistant{})
+	s := New(Config{AllowedOrigin: testOrigin}, newFakeNoteRepository(), newFakeUserRepository(), fakeVerifier{uid: "caller"})
 
 	rec := httptest.NewRecorder()
-	s.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodOptions, "/blogs", nil))
+	s.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodOptions, "/notes", nil))
 
 	if rec.Result().StatusCode != http.StatusNoContent {
 		t.Errorf("status = %d, want %d (preflight must not reach the method-specific mux)", rec.Result().StatusCode, http.StatusNoContent)

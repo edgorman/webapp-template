@@ -11,13 +11,13 @@ const profile: CurrentUser = {
   bio: '',
   createdAt: '2026-01-01T00:00:00Z',
   updatedAt: '2026-01-01T00:00:00Z',
-  assistantEnabled: false,
 }
 
 describe('NavBar', () => {
   it('renders the brand and theme toggle, with no account panel open by default', () => {
     renderWithApp(<NavBar />)
-    expect(screen.getByRole('link', { name: 'blog, gorman club' })).toHaveAttribute('href', '/')
+    // The brand is the site's name, from config.json.
+    expect(screen.getByRole('link', { name: 'Example App' })).toHaveAttribute('href', '/')
     expect(screen.getByRole('button', { name: 'Toggle dark mode' })).toBeInTheDocument()
     expect(screen.queryByRole('dialog', { name: 'Account' })).not.toBeInTheDocument()
   })
@@ -30,23 +30,14 @@ describe('NavBar', () => {
     expect(toggleTheme).toHaveBeenCalledTimes(1)
   })
 
-  it('opens the account panel with New post, View profile, and Sign out when signed in', async () => {
+  it('opens the account panel with New note and Sign out when signed in', async () => {
     const signOut = vi.fn()
     renderWithApp(<NavBar />, { context: { user: author, profile, signOut } })
 
     await userEvent.click(screen.getByRole('button', { name: 'Account' }))
     const dialog = screen.getByRole('dialog', { name: 'Account' })
     expect(dialog).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: 'New post' })).toHaveAttribute('href', '/post/new')
-    expect(screen.getByRole('link', { name: 'View profile' })).toHaveAttribute(
-      'href',
-      '/user/calm-smiling-kestrel',
-    )
-    // The editor sits under the profile it edits, so its link is the profile's path plus /edit.
-    expect(screen.getByRole('link', { name: 'Edit profile' })).toHaveAttribute(
-      'href',
-      '/user/calm-smiling-kestrel/edit',
-    )
+    expect(screen.getByRole('link', { name: 'New note' })).toHaveAttribute('href', '/note/new')
 
     await userEvent.click(screen.getByRole('button', { name: 'Sign out' }))
     expect(signOut).toHaveBeenCalledTimes(1)
@@ -61,7 +52,7 @@ describe('NavBar', () => {
 
     await userEvent.click(screen.getByRole('button', { name: 'Account' }))
 
-    expect(screen.getByText('calm-smiling-kestrel')).toBeInTheDocument()
+    expect(screen.getAllByText('calm-smiling-kestrel')[0]).toBeInTheDocument()
     expect(screen.getByText('a@b.com')).toBeInTheDocument()
     expect(screen.queryByText('Ada Lovelace')).not.toBeInTheDocument()
   })
@@ -79,7 +70,7 @@ describe('NavBar', () => {
     renderWithApp(<NavBar />, { context: { renderSignInButton } })
 
     await userEvent.click(screen.getByRole('button', { name: 'Account' }))
-    expect(screen.getByText('Sign in to publish and manage your posts.')).toBeInTheDocument()
+    expect(screen.getByText('Sign in to write and manage your notes.')).toBeInTheDocument()
     expect(renderSignInButton).toHaveBeenCalled()
   })
 

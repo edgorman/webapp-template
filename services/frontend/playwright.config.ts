@@ -6,7 +6,8 @@ import { defineConfig } from '@playwright/test'
 // matching one instead.
 const preinstalled = `${process.env.PLAYWRIGHT_BROWSERS_PATH}/chromium`
 
-// The post-deploy smoke test (#277): read-only and signed out, against the live staging site.
+// The post-deploy smoke test: read-only and signed out, against the live site at SMOKE_BASE_URL
+// (push-commit.yaml passes the STAGING_URL repository variable).
 // Named *.e2e.ts so `npm test`'s default test match never picks it up.
 export default defineConfig({
   testDir: 'e2e',
@@ -16,7 +17,7 @@ export default defineConfig({
   expect: { timeout: 15_000 },
   reporter: process.env.CI ? [['github'], ['list']] : 'list',
   use: {
-    baseURL: process.env.SMOKE_BASE_URL ?? 'https://staging.blog.gorman.club',
+    baseURL: process.env.SMOKE_BASE_URL,
     launchOptions: statSync(preinstalled, { throwIfNoEntry: false })?.isFile() ? { executablePath: preinstalled } : {},
   },
 })

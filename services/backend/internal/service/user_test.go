@@ -2,7 +2,6 @@ package service
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -13,9 +12,9 @@ import (
 
 	"google.golang.org/protobuf/encoding/protojson"
 
-	"github.com/edgorman/blog.gorman.club/services/backend/internal/entity"
-	blogv1 "github.com/edgorman/blog.gorman.club/services/backend/internal/gen/blog/v1"
-	"github.com/edgorman/blog.gorman.club/services/backend/internal/repository"
+	"github.com/edgorman/webapp-template/services/backend/internal/entity"
+	appv1 "github.com/edgorman/webapp-template/services/backend/internal/gen/app/v1"
+	"github.com/edgorman/webapp-template/services/backend/internal/repository"
 )
 
 // selfHTTPRequest builds a request against /users/me carrying uid as the verified caller. There is
@@ -44,7 +43,7 @@ func ptr(s string) *string { return &s }
 
 // wireUser and wireCurrentUser are what a response body actually carries, spelled out here rather
 // than decoded into a production type. Reusing entity.User - which these tests did before the
-// profile moved onto blogv1.User - hid the wire: both sides would move together and a field
+// profile moved onto appv1.User - hid the wire: both sides would move together and a field
 // leaving the body would assert nothing. Declared separately, a rename fails here.
 type wireUser struct {
 	ID        string `json:"id"`
@@ -56,11 +55,9 @@ type wireUser struct {
 
 type wireCurrentUser struct {
 	wireUser
-	AssistantEnabled bool    `json:"assistantEnabled"`
-	SubscribedUntil  *string `json:"subscribedUntil"`
 }
 
-func userRequestBody(t *testing.T, body *blogv1.UpdateCurrentUserRequest) []byte {
+func userRequestBody(t *testing.T, body *appv1.UpdateCurrentUserRequest) []byte {
 	t.Helper()
 
 	encoded, err := protojson.Marshal(body)
@@ -74,7 +71,7 @@ func TestPutUser_CreatesOwnProfile(t *testing.T) {
 	repo := newFakeUserRepository()
 	s := newTestService(nil, repo)
 
-	body := userRequestBody(t, &blogv1.UpdateCurrentUserRequest{Bio: "hello"})
+	body := userRequestBody(t, &appv1.UpdateCurrentUserRequest{Bio: "hello"})
 	rec := httptest.NewRecorder()
 	s.PutUser(rec, selfHTTPRequest(http.MethodPut, "caller", body))
 
@@ -114,32 +111,6 @@ func TestPutUser_UpdatePreservesCreatedAt(t *testing.T) {
 	}
 }
 
-// subscribedUntil is written out of band; a profile edit must carry the stored value rather than
-// whatever it read before that write.
-func TestPutUser_KeepsTheStoredSubscription(t *testing.T) {
-	until := time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC)
-	repo := newFakeUserRepository()
-	repo.seed(entity.User{ID: "caller", Username: "sly-dancing-monkey"})
-	repo.beforePut = func(entity.User) error {
-		repo.beforePut = nil
-		stored := repo.users["caller"]
-		stored.SubscribedUntil = &until
-		repo.users["caller"] = stored
-		return nil
-	}
-	s := newTestService(nil, repo)
-
-	rec := httptest.NewRecorder()
-	s.PutUser(rec, selfHTTPRequest(http.MethodPut, "caller", []byte(`{"bio":"Edward"}`)))
-
-	if rec.Result().StatusCode != http.StatusOK {
-		t.Fatalf("status = %d, want %d", rec.Result().StatusCode, http.StatusOK)
-	}
-	if got := repo.users["caller"].SubscribedUntil; got == nil || !got.Equal(until) {
-		t.Errorf("SubscribedUntil = %v, want %v", got, until)
-	}
-}
-
 // There is no id in the path to forge, so a write can only ever land on the caller's own profile.
 // This pins that: two different callers writing the same body get two separate profiles, and
 // neither can name the other.
@@ -148,7 +119,7 @@ func TestPutUser_AlwaysWritesTheCallersOwnProfile(t *testing.T) {
 	repo.seed(entity.User{ID: "someone-else", Username: "bold-leaping-lynx"})
 	s := newTestService(nil, repo)
 
-	body := userRequestBody(t, &blogv1.UpdateCurrentUserRequest{Bio: "impostor"})
+	body := userRequestBody(t, &appv1.UpdateCurrentUserRequest{Bio: "impostor"})
 	rec := httptest.NewRecorder()
 	s.PutUser(rec, selfHTTPRequest(http.MethodPut, "caller", body))
 
@@ -166,7 +137,7 @@ func TestPutUser_AlwaysWritesTheCallersOwnProfile(t *testing.T) {
 func TestPutUser_RejectsOverlongBio(t *testing.T) {
 	s := newTestService(nil, nil)
 
-	body := userRequestBody(t, &blogv1.UpdateCurrentUserRequest{Bio: strings.Repeat("a", entity.MaxBioLength+1)})
+	body := userRequestBody(t, &appv1.UpdateCurrentUserRequest{Bio: strings.Repeat("a", entity.MaxBioLength+1)})
 	rec := httptest.NewRecorder()
 	s.PutUser(rec, selfHTTPRequest(http.MethodPut, "caller", body))
 
@@ -248,7 +219,7 @@ func TestPutUser_AssignsAGeneratedUsername(t *testing.T) {
 	repo := newFakeUserRepository()
 	s := newTestService(nil, repo)
 
-	body := userRequestBody(t, &blogv1.UpdateCurrentUserRequest{})
+	body := userRequestBody(t, &appv1.UpdateCurrentUserRequest{})
 	rec := httptest.NewRecorder()
 	s.PutUser(rec, selfHTTPRequest(http.MethodPut, "caller", body))
 
@@ -295,7 +266,7 @@ func TestPutUser_RetriesWhenAGeneratedUsernameCollides(t *testing.T) {
 		return nil
 	}
 
-	body := userRequestBody(t, &blogv1.UpdateCurrentUserRequest{})
+	body := userRequestBody(t, &appv1.UpdateCurrentUserRequest{})
 	rec := httptest.NewRecorder()
 	s.PutUser(rec, selfHTTPRequest(http.MethodPut, "caller", body))
 
@@ -317,7 +288,7 @@ func TestPutUser_GivesUpAfterRepeatedCollisions(t *testing.T) {
 	repo.beforePut = func(entity.User) error { return repository.ErrUsernameTaken }
 	s := newTestService(nil, repo)
 
-	body := userRequestBody(t, &blogv1.UpdateCurrentUserRequest{})
+	body := userRequestBody(t, &appv1.UpdateCurrentUserRequest{})
 	rec := httptest.NewRecorder()
 	s.PutUser(rec, selfHTTPRequest(http.MethodPut, "caller", body))
 
@@ -337,7 +308,7 @@ func TestPutUser_OmittedUsernameIsUnchanged(t *testing.T) {
 	repo.seed(entity.User{ID: "caller", Username: "sly-dancing-monkey"})
 	s := newTestService(nil, repo)
 
-	body := userRequestBody(t, &blogv1.UpdateCurrentUserRequest{Bio: "new bio"})
+	body := userRequestBody(t, &appv1.UpdateCurrentUserRequest{Bio: "new bio"})
 	rec := httptest.NewRecorder()
 	s.PutUser(rec, selfHTTPRequest(http.MethodPut, "caller", body))
 
@@ -354,7 +325,7 @@ func TestPutUser_RenameReleasesTheOldUsername(t *testing.T) {
 	repo.seed(entity.User{ID: "caller", Username: "sly-dancing-monkey"})
 	s := newTestService(nil, repo)
 
-	body := userRequestBody(t, &blogv1.UpdateCurrentUserRequest{Username: ptr("bold-leaping-lynx")})
+	body := userRequestBody(t, &appv1.UpdateCurrentUserRequest{Username: ptr("bold-leaping-lynx")})
 	rec := httptest.NewRecorder()
 	s.PutUser(rec, selfHTTPRequest(http.MethodPut, "caller", body))
 
@@ -377,7 +348,7 @@ func TestPutUser_RejectsAUsernameHeldByAnotherUser(t *testing.T) {
 	repo.seed(entity.User{ID: "someone", Username: "sly-dancing-monkey"})
 	s := newTestService(nil, repo)
 
-	body := userRequestBody(t, &blogv1.UpdateCurrentUserRequest{Username: ptr("Sly-Dancing-Monkey")})
+	body := userRequestBody(t, &appv1.UpdateCurrentUserRequest{Username: ptr("Sly-Dancing-Monkey")})
 	rec := httptest.NewRecorder()
 	s.PutUser(rec, selfHTTPRequest(http.MethodPut, "caller", body))
 
@@ -394,7 +365,7 @@ func TestPutUser_RejectsAUsernameHeldByAnotherUser(t *testing.T) {
 func TestPutUser_RejectsAMalformedUsername(t *testing.T) {
 	s := newTestService(nil, nil)
 
-	body := userRequestBody(t, &blogv1.UpdateCurrentUserRequest{Username: ptr("sly dancing monkey")})
+	body := userRequestBody(t, &appv1.UpdateCurrentUserRequest{Username: ptr("sly dancing monkey")})
 	rec := httptest.NewRecorder()
 	s.PutUser(rec, selfHTTPRequest(http.MethodPut, "caller", body))
 
@@ -596,7 +567,7 @@ func TestGetCurrentUser_NotFound(t *testing.T) {
 func TestPutUser_RejectsAReservedUsername(t *testing.T) {
 	s := newTestService(nil, nil)
 
-	body := userRequestBody(t, &blogv1.UpdateCurrentUserRequest{Username: ptr("me")})
+	body := userRequestBody(t, &appv1.UpdateCurrentUserRequest{Username: ptr("me")})
 	rec := httptest.NewRecorder()
 	s.PutUser(rec, selfHTTPRequest(http.MethodPut, "caller", body))
 
@@ -646,137 +617,8 @@ func TestPutUser_OmittedUsernameKeepsTheStoredName(t *testing.T) {
 	}
 }
 
-// The capability rides on /users/me rather than on a route of its own: a client uses it to decide
-// whether to offer the assistant at all, and a public profile must not disclose who has it. It is
-// the account's own subscription that decides it, so a client is told exactly what the chat routes
-// would enforce.
-func TestGetCurrentUser_ReportsAssistantAccess(t *testing.T) {
-	live := time.Now().UTC().Add(time.Hour)
-	expired := time.Now().UTC().Add(-time.Minute)
-
-	for _, tt := range []struct {
-		name  string
-		until *time.Time
-		want  bool
-	}{
-		{"a live subscription", &live, true},
-		{"a subscription that ran out", &expired, false},
-		{"never subscribed", nil, false},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
-			users := newFakeUserRepository()
-			users.seed(entity.User{ID: "caller", Username: "calm-smiling-kestrel", SubscribedUntil: tt.until})
-			s := newAssistantService(nil, users, nil, nil)
-
-			rec := httptest.NewRecorder()
-			s.GetCurrentUser(rec, selfHTTPRequest(http.MethodGet, "caller", nil))
-
-			var got wireCurrentUser
-			if err := json.NewDecoder(rec.Body).Decode(&got); err != nil {
-				t.Fatalf("decode response: %v", err)
-			}
-			if got.AssistantEnabled != tt.want {
-				t.Errorf("assistantEnabled = %v, want %v", got.AssistantEnabled, tt.want)
-			}
-			// An account may see when its own paid access runs out, expired or not; nobody else's
-			// lookup carries it at all.
-			if (got.SubscribedUntil != nil) != (tt.until != nil) {
-				t.Errorf("subscribedUntil = %v, want %v", got.SubscribedUntil, tt.until)
-			}
-			// The profile itself still comes back whole, so a client needs one request, not two.
-			if got.Username != "calm-smiling-kestrel" {
-				t.Errorf("username = %q, want the profile alongside the capability", got.Username)
-			}
-		})
-	}
-}
-
-// A client editing its bio must not clear its paid access: the request is applied to the stored
-// profile, and a subscription is not a field a request can carry at all.
-func TestPutUser_KeepsTheSubscription(t *testing.T) {
-	until := time.Now().UTC().Add(time.Hour)
-	users := newFakeUserRepository()
-	users.seed(entity.User{ID: "caller", Username: "calm-smiling-kestrel", SubscribedUntil: &until})
-	s := newTestService(nil, users)
-
-	body := userRequestBody(t, &blogv1.UpdateCurrentUserRequest{Bio: "hello"})
-	rec := httptest.NewRecorder()
-	s.PutUser(rec, selfHTTPRequest(http.MethodPut, "caller", body))
-
-	if rec.Result().StatusCode != http.StatusOK {
-		t.Fatalf("status = %d, want %d", rec.Result().StatusCode, http.StatusOK)
-	}
-	stored := users.users["caller"]
-	if stored.SubscribedUntil == nil || !stored.SubscribedUntil.Equal(until) {
-		t.Errorf("stored subscribedUntil = %v, want %v", stored.SubscribedUntil, until)
-	}
-}
-
-// Who is paying is nobody else's business: a profile looked up by name carries no subscription at
-// all, however the account it names pays. entity.User holds no json tag for the field, so this is
-// checked on the bytes rather than on a struct that could not represent it.
-func TestGetUser_HidesTheSubscription(t *testing.T) {
-	until := time.Now().UTC().Add(time.Hour)
-	users := newFakeUserRepository()
-	users.seed(entity.User{ID: "caller", Username: "calm-smiling-kestrel", SubscribedUntil: &until})
-	s := newTestService(nil, users)
-
-	req := httptest.NewRequest(http.MethodGet, "/users/calm-smiling-kestrel", nil)
-	req.SetPathValue("username", "calm-smiling-kestrel")
-	rec := httptest.NewRecorder()
-	s.GetUser(rec, req)
-
-	if rec.Result().StatusCode != http.StatusOK {
-		t.Fatalf("status = %d, want %d", rec.Result().StatusCode, http.StatusOK)
-	}
-	if strings.Contains(rec.Body.String(), "subscribedUntil") {
-		t.Errorf("body = %s, want a public profile to disclose no subscription", rec.Body.String())
-	}
-	if strings.Contains(rec.Body.String(), "assistantEnabled") {
-		t.Errorf("body = %s, want a public profile to disclose no capability either", rec.Body.String())
-	}
-}
-
-// A client that has just written its profile learns what it may do without a second request, so
-// PUT answers in the same shape GET does. A brand new profile has not subscribed, which is what
-// makes the two cases worth asserting together.
-func TestPutUser_ReportsAssistantAccess(t *testing.T) {
-	until := time.Now().UTC().Add(time.Hour)
-	users := newFakeUserRepository()
-	users.seed(entity.User{ID: "subscriber", Username: "calm-smiling-kestrel", SubscribedUntil: &until})
-	s := newAssistantService(nil, users, nil, nil)
-
-	for _, tt := range []struct {
-		uid    string
-		status int
-		want   bool
-	}{
-		{"subscriber", http.StatusOK, true},
-		{"newcomer", http.StatusCreated, false},
-	} {
-		t.Run(tt.uid, func(t *testing.T) {
-			body := userRequestBody(t, &blogv1.UpdateCurrentUserRequest{Bio: "hello"})
-			rec := httptest.NewRecorder()
-			s.PutUser(rec, selfHTTPRequest(http.MethodPut, tt.uid, body))
-
-			if rec.Result().StatusCode != tt.status {
-				t.Fatalf("status = %d, want %d", rec.Result().StatusCode, tt.status)
-			}
-			var got wireCurrentUser
-			if err := json.NewDecoder(rec.Body).Decode(&got); err != nil {
-				t.Fatalf("decode response: %v", err)
-			}
-			if got.AssistantEnabled != tt.want {
-				t.Errorf("assistantEnabled = %v, want %v", got.AssistantEnabled, tt.want)
-			}
-		})
-	}
-}
-
-// The response body is the contract, so these two pin it literally rather than field by field.
-// #169 moved profiles from encoding/json over hand-written tags to protojson over generated
-// messages; the point of asserting whole bodies is that the swap is visible here if it ever
-// changes what a client receives, rather than showing up as a frontend bug.
+// The response body is the contract, so these two pin it literally rather than field by field: a
+// change to what a client receives shows up here rather than as a frontend bug.
 func TestGetUser_WireBody(t *testing.T) {
 	at := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
 	repo := newFakeUserRepository()
@@ -792,9 +634,6 @@ func TestGetUser_WireBody(t *testing.T) {
 	}
 }
 
-// An account that has never subscribed carries no subscribedUntil at all - absent, not null.
-// EmitDefaultValues is what holds that line: EmitUnpopulated would emit null here instead, which
-// is a field the frontend has never modelled.
 func TestGetCurrentUser_WireBody(t *testing.T) {
 	at := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
 	repo := newFakeUserRepository()
@@ -804,55 +643,30 @@ func TestGetCurrentUser_WireBody(t *testing.T) {
 	rec := httptest.NewRecorder()
 	s.GetCurrentUser(rec, selfHTTPRequest(http.MethodGet, "caller", nil))
 
-	want := `{"id":"caller","username":"calm-smiling-kestrel","bio":"","createdAt":"2026-01-02T03:04:05Z","updatedAt":"2026-01-02T03:04:05Z","assistantEnabled":false}`
+	want := `{"id":"caller","username":"calm-smiling-kestrel","bio":"","createdAt":"2026-01-02T03:04:05Z","updatedAt":"2026-01-02T03:04:05Z"}`
 	if got := strings.TrimSpace(rec.Body.String()); got != want {
 		t.Errorf("body =\n%s\nwant\n%s", got, want)
 	}
 }
 
-// eraseFixture is an account ("caller") with a post, an old soft-deleted post, a comment and
-// reactions on someone else's post, and other readers' comments and reactions on its own post and
-// comment - everything DeleteUser has to find.
+// eraseFixture is an account ("caller") with a public and a private note, beside another
+// account's note - everything DeleteUser has to find, and something it must not.
 type eraseFixture struct {
-	s         *Service
-	blogs     *fakeBlogRepository
-	users     *fakeUserRepository
-	chats     *fakeChatRepository
-	comments  *fakeCommentRepository
-	reactions *fakeReactionRepository
+	s     *Service
+	notes *fakeNoteRepository
+	users *fakeUserRepository
 }
 
 func newEraseFixture() eraseFixture {
-	f := eraseFixture{
-		blogs:     newFakeBlogRepository(),
-		users:     newFakeUserRepository(),
-		chats:     newFakeChatRepository(),
-		comments:  newFakeCommentRepository(),
-		reactions: newFakeReactionRepository(),
-	}
+	f := eraseFixture{notes: newFakeNoteRepository(), users: newFakeUserRepository()}
 	f.users.seed(entity.User{ID: "caller", Username: "sly-dancing-monkey"})
 	f.users.seed(entity.User{ID: "other", Username: "bold-leaping-lynx"})
-
-	now := time.Now().UTC()
-	f.blogs.seed(
-		entity.Blog{Slug: "mine", OwnerID: "caller", Title: "Mine", Content: "Body", Visibility: entity.VisibilityPublic, CreatedAt: now},
-		entity.Blog{Slug: "mine-deleted", OwnerID: "caller", Title: "Gone", Content: "Body", Visibility: entity.VisibilityPublic, CreatedAt: now, DeletedAt: &now},
-		entity.Blog{Slug: "theirs", OwnerID: "other", Title: "Theirs", Content: "Body", Visibility: entity.VisibilityPublic, CreatedAt: now},
+	f.notes.seed(
+		entity.Note{ID: "mine", OwnerID: "caller", Visibility: entity.VisibilityPublic},
+		entity.Note{ID: "minePrivate", OwnerID: "caller", Visibility: entity.VisibilityPrivate},
+		entity.Note{ID: "theirs", OwnerID: "other", Visibility: entity.VisibilityPublic},
 	)
-	f.chats.seed(entity.Chat{BlogSlug: "mine", OwnerID: "caller"})
-	f.comments.seed(
-		entity.Comment{ID: "c1", BlogSlug: "theirs", AuthorID: "caller", Body: "callers comment", CreatedAt: now},
-		entity.Comment{ID: "c2", BlogSlug: "theirs", AuthorID: "other", Body: "others comment", CreatedAt: now},
-		entity.Comment{ID: "c3", BlogSlug: "mine", AuthorID: "other", Body: "reply on mine", CreatedAt: now},
-	)
-	f.reactions.seed(
-		entity.Reaction{Target: entity.ReactionTarget{BlogSlug: "theirs"}, UID: "caller", Emojis: []string{"👍"}},
-		entity.Reaction{Target: entity.ReactionTarget{BlogSlug: "theirs", CommentID: "c2"}, UID: "caller", Emojis: []string{"🎉"}},
-		entity.Reaction{Target: entity.ReactionTarget{BlogSlug: "theirs", CommentID: "c1"}, UID: "other", Emojis: []string{"❤️"}},
-		entity.Reaction{Target: entity.ReactionTarget{BlogSlug: "theirs"}, UID: "other", Emojis: []string{"👍"}},
-	)
-
-	f.s = newFullService(f.blogs, f.users, f.chats, f.comments, f.reactions, nil)
+	f.s = newTestService(f.notes, f.users)
 	return f
 }
 
@@ -865,60 +679,22 @@ func (f eraseFixture) deleteAccount(t *testing.T, want int) {
 	}
 }
 
-// get serves path anonymously through the router, as a stranger landing on the site would.
-func (f eraseFixture) get(path string) *httptest.ResponseRecorder {
-	rec := httptest.NewRecorder()
-	f.s.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
-	return rec
-}
-
 func (f eraseFixture) assertErased(t *testing.T) {
 	t.Helper()
 
 	if _, ok := f.users.users["caller"]; ok {
 		t.Error("profile still stored")
 	}
-	for _, slug := range []string{"mine", "mine-deleted"} {
-		if _, ok := f.blogs.stored(slug); ok {
-			t.Errorf("post %q still stored", slug)
+	for _, id := range []string{"mine", "minePrivate"} {
+		if _, ok := f.notes.notes[id]; ok {
+			t.Errorf("note %q still stored", id)
 		}
-	}
-	if _, ok := f.chats.chats["mine"]; ok {
-		t.Error("chat on the erased post still stored")
-	}
-	if authored, _ := f.comments.ListByAuthor(context.Background(), "caller"); len(authored) != 0 {
-		t.Errorf("%d comments by the account still stored", len(authored))
-	}
-	for _, reaction := range f.reactions.reactions {
-		if reaction.UID == "caller" {
-			t.Errorf("reaction by the account still stored: %+v", reaction)
-		}
-		if reaction.Target.CommentID == "c1" {
-			t.Errorf("reaction to the account's comment still stored: %+v", reaction)
-		}
-	}
-
-	if rec := f.get("/blogs"); rec.Code != http.StatusOK || strings.Contains(rec.Body.String(), `"mine`) {
-		t.Errorf("GET /blogs = %d %s, want the erased posts gone", rec.Code, rec.Body)
-	}
-	if rec := f.get("/blogs/mine"); rec.Code != http.StatusNotFound {
-		t.Errorf("GET /blogs/mine = %d, want %d", rec.Code, http.StatusNotFound)
-	}
-	if rec := f.get("/blogs/mine/comments"); rec.Code != http.StatusNotFound {
-		t.Errorf("GET /blogs/mine/comments = %d, want %d", rec.Code, http.StatusNotFound)
-	}
-	rec := f.get("/blogs/theirs/comments")
-	if rec.Code != http.StatusOK || strings.Contains(rec.Body.String(), "callers comment") {
-		t.Errorf("GET /blogs/theirs/comments = %d %s, want the account's comment gone", rec.Code, rec.Body)
-	}
-	if !strings.Contains(rec.Body.String(), "others comment") {
-		t.Error("another account's comment was erased too")
 	}
 	if _, ok := f.users.users["other"]; !ok {
 		t.Error("another account's profile was erased too")
 	}
-	if _, ok := f.blogs.stored("theirs"); !ok {
-		t.Error("another account's post was erased too")
+	if _, ok := f.notes.notes["theirs"]; !ok {
+		t.Error("another account's note was erased too")
 	}
 }
 
@@ -932,7 +708,7 @@ func TestDeleteUser_ErasesEverythingTheAccountCreated(t *testing.T) {
 // finishes the job rather than answering 404 over half-erased content.
 func TestDeleteUser_RetryFinishesAPartialErasure(t *testing.T) {
 	f := newEraseFixture()
-	f.blogs.purgeErr = errors.New("firestore unavailable")
+	f.notes.deleteOwnedErr = errors.New("firestore unavailable")
 
 	f.deleteAccount(t, http.StatusInternalServerError)
 	if _, ok := f.users.users["caller"]; !ok {

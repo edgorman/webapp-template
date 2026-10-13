@@ -9,20 +9,17 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/edgorman/blog.gorman.club/services/backend/internal/entity"
-	"github.com/edgorman/blog.gorman.club/services/backend/internal/repository"
+	"github.com/edgorman/webapp-template/services/backend/internal/entity"
+	"github.com/edgorman/webapp-template/services/backend/internal/repository"
 )
 
-// userDocument is the stored shape of a profile; see blogDocument for why it is separate.
+// userDocument is the stored shape of a profile; it exists so Firestore's field names live here
+// rather than as a second set of tags on entity.User.
 type userDocument struct {
-	Username string `firestore:"username"`
-	Bio      string `firestore:"bio"`
-	// SubscribedUntil is omitted rather than stored as the zero time for an account that never
-	// subscribed, so "has never paid" is an absent field rather than a date in 1 AD - which a
-	// query for live subscriptions would otherwise have to know to exclude.
-	SubscribedUntil *time.Time `firestore:"subscribedUntil,omitempty"`
-	CreatedAt       time.Time  `firestore:"createdAt"`
-	UpdatedAt       time.Time  `firestore:"updatedAt"`
+	Username  string    `firestore:"username"`
+	Bio       string    `firestore:"bio"`
+	CreatedAt time.Time `firestore:"createdAt"`
+	UpdatedAt time.Time `firestore:"updatedAt"`
 }
 
 // usernameDocument is a claim on one username, keyed by entity.User.UsernameKey. Uniqueness is a
@@ -34,23 +31,21 @@ type usernameDocument struct {
 
 func userToDocument(user entity.User) userDocument {
 	return userDocument{
-		Username:        user.Username,
-		Bio:             user.Bio,
-		SubscribedUntil: user.SubscribedUntil,
-		CreatedAt:       user.CreatedAt,
-		UpdatedAt:       user.UpdatedAt,
+		Username:  user.Username,
+		Bio:       user.Bio,
+		CreatedAt: user.CreatedAt,
+		UpdatedAt: user.UpdatedAt,
 	}
 }
 
 // toEntity rebuilds a profile from its stored fields; id is the document key.
 func (d userDocument) toEntity(id string) entity.User {
 	return entity.User{
-		ID:              id,
-		Username:        d.Username,
-		Bio:             d.Bio,
-		SubscribedUntil: d.SubscribedUntil,
-		CreatedAt:       d.CreatedAt,
-		UpdatedAt:       d.UpdatedAt,
+		ID:        id,
+		Username:  d.Username,
+		Bio:       d.Bio,
+		CreatedAt: d.CreatedAt,
+		UpdatedAt: d.UpdatedAt,
 	}
 }
 
@@ -120,15 +115,6 @@ func (r *UserRepository) GetByUsername(ctx context.Context, username string) (en
 // Put writes the profile and, when the username is new to it, moves the reservation across in the
 // same transaction, so the two can never disagree about who holds what.
 func (r *UserRepository) Put(ctx context.Context, user entity.User) (entity.User, error) {
-	return r.put(ctx, user, false)
-}
-
-// Create is Put refusing a profile that already exists, decided inside the same transaction.
-func (r *UserRepository) Create(ctx context.Context, user entity.User) (entity.User, error) {
-	return r.put(ctx, user, true)
-}
-
-func (r *UserRepository) put(ctx context.Context, user entity.User, create bool) (entity.User, error) {
 	user, err := user.Normalized()
 	if err != nil {
 		return entity.User{}, err
@@ -147,8 +133,6 @@ func (r *UserRepository) put(ctx context.Context, user entity.User, create bool)
 			// A profile being written for the first time holds no username yet.
 		case err != nil:
 			return err
-		case create:
-			return repository.ErrUserExists
 		default:
 			if err := stored.DataTo(&current); err != nil {
 				return err
@@ -184,7 +168,6 @@ func (r *UserRepository) put(ctx context.Context, user entity.User, create bool)
 			user.CreatedAt = now
 		}
 		user.UpdatedAt = now
-		user.SubscribedUntil = current.SubscribedUntil
 
 		if claiming {
 			if err := tx.Set(r.usernames.Doc(key), usernameDocument{UserID: user.ID}); err != nil {
