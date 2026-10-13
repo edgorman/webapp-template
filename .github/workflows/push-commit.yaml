@@ -149,7 +149,9 @@ jobs:
           # disagree about what tag this commit becomes.
           version: v${{ needs.version.outputs.version }}
           environment: 'staging'
-          site_url: ${{ vars.STAGING_URL }}
+          # Production's URL on staging too: it is the canonical origin pages link to, so staging
+          # never competes with production in search results (see services/frontend/README.md).
+          site_url: ${{ vars.PRODUCTION_URL }}
           site_name: ${{ vars.SITE_NAME }}
 
   infrastructure-root:

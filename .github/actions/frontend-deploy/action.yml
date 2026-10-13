@@ -25,7 +25,7 @@ inputs:
     required: false
     default: ''
   site_url:
-    description: 'Public URL of this environment''s site (the STAGING_URL or PRODUCTION_URL repository variable), written into config.json for page metadata and the Pages worker. Omit to leave it out of config.json.'
+    description: 'Canonical (production) URL of the site, the PRODUCTION_URL repository variable on every environment, written into config.json for canonical links and the Pages worker. Omit to leave it out of config.json.'
     required: false
     default: ''
   site_name:
