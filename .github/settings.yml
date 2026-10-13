@@ -6,8 +6,11 @@
 
 repository:
   # General
-  name: blog.gorman.club
-  description: The blog subdomain for the gorman.club website.
+  name: webapp-template
+  description: Template for a full-stack web app - Go on Cloud Run, React on Cloudflare Pages, Terraform, moon, trunk-based CI/CD.
+  # A GitHub template repository, so "Use this template" creates new repositories from it. A
+  # repository made from it sets this back to false along with its own name (docs/new-repo.md).
+  is_template: true
   private: false
   has_issues: true
   has_projects: false
@@ -68,7 +71,7 @@ branches:
       #
       # `strict: true` makes each PR re-run CI after every merge ahead of it. A merge queue would
       # batch that, but GitHub only offers merge queues to organization-owned repositories, and
-      # this one is user-owned, so there is no queue to configure here (#275). pull-request.yaml
+      # this one is user-owned, so there is no queue to configure here. pull-request.yaml
       # already runs on merge_group for when the repository moves to an organization.
       required_status_checks:
         strict: true
@@ -83,7 +86,7 @@ branches:
           - pr-title
           - protos-breaking
 
-      # Stays false on purpose (#275): Claude Code opens PRs as @edgorman, GitHub never lets an
+      # Stays false on purpose: Claude Code opens PRs as the repository owner, GitHub never lets an
       # author approve their own PR, so the owner merges those with the admin override. Revisit
       # once a second code owner can approve them.
       enforce_admins: false

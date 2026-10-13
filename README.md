@@ -1,8 +1,4 @@
-# blog.gorman.club
-
-[![Push Commit](https://github.com/edgorman/blog.gorman.club/actions/workflows/push-commit.yaml/badge.svg?branch=main)](https://github.com/edgorman/blog.gorman.club/actions/workflows/push-commit.yaml)
-[![Promote Release](https://github.com/edgorman/blog.gorman.club/actions/workflows/promote-release.yaml/badge.svg)](https://github.com/edgorman/blog.gorman.club/actions/workflows/promote-release.yaml)
-[![Release](https://img.shields.io/github/v/release/edgorman/blog.gorman.club?include_prereleases)](https://github.com/edgorman/blog.gorman.club/releases)
+# webapp-template
 
 [![Go](https://img.shields.io/badge/Go-1.26-00ADD8?logo=go&logoColor=white)](services/backend)
 [![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)](services/frontend)
@@ -13,13 +9,15 @@
 [![Cloudflare Pages](https://img.shields.io/badge/Cloudflare-Pages-F38020?logo=cloudflare&logoColor=white)](infrastructure)
 [![moon](https://img.shields.io/badge/moon-2.5-6F53F3)](https://moonrepo.dev)
 
-A demo of a small, cloud-deployed full-stack web service - a blog with a Gemini-backed writing assistant - built to show a trunk-based monorepo with CI/CD and infrastructure-as-code, rather than a real blog hosting platform.
+A GitHub template for a small, cloud-deployed full-stack web app: a trunk-based monorepo with CI/CD and infrastructure-as-code already wired up, and services stripped down to sign-in, profiles and one example resource (`notes`) to copy or delete.
+
+**Starting a new project?** Click **Use this template**, then follow [`docs/new-repo.md`](docs/new-repo.md). Until its one manual bootstrap step, a new repository runs only the PR checks: every deploy job skips itself.
 
 ## What's in here
 
 | Path | What |
 | --- | --- |
-| `services/backend` | Go API (Firestore, Gemini), shipped as a container to GCP Cloud Run |
+| `services/backend` | Go API (Firestore, Google sign-in), shipped as a container to GCP Cloud Run |
 | `services/frontend` | Vite/React single-page app, deployed to Cloudflare Pages |
 | `packages/protos` | Protobuf API contract; `buf generate` writes the Go and TypeScript types |
 | `infrastructure` | Terraform for the shared root, staging and prod environments (GCP, Cloudflare, GitHub) |
@@ -31,7 +29,6 @@ Every merge to `main` deploys to staging; production releases are promoted from 
 ## Developing with moon
 
 New here? [`docs/start-here.md`](docs/start-here.md) goes from a fresh clone to an open pull request, with no GCP access needed.
-
 
 [moon](https://moonrepo.dev) runs every task, and [proto](https://moonrepo.dev/proto) pins the toolchain (`.prototools`: Go, Node, npm, buf, Terraform, moon itself).
 
@@ -51,9 +48,8 @@ moon project services/backend                   # list a project's tasks
 
 Each project's tasks live in its `moon.yml` (e.g. `services/backend/moon.yml`). If you change a `.proto`, regenerate with `buf generate` in `packages/protos` and commit the output alongside it.
 
-
 ## Contributing and licence
 
 See [`CONTRIBUTING.md`](.github/CONTRIBUTING.md) and the [code of conduct](.github/CODE_OF_CONDUCT.md).
 
-The code in this repository is [MIT-licensed](LICENSE). That covers the code only, not the posts and comments users publish on the site, which fall under the site's terms of service.
+The code in this repository is [MIT-licensed](LICENSE).

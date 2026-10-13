@@ -1,14 +1,14 @@
 # Start here
 
-From a fresh clone to an open pull request. None of it needs GCP access.
+From a fresh clone to an open pull request. None of it needs GCP access. (Setting up a new repository from the template, GCP and all, is [`new-repo.md`](new-repo.md).)
 
 ## 1. Clone and install the toolchain
 
 You need git, [proto](https://moonrepo.dev/docs/proto/install), and for the local backend the [gcloud CLI](https://cloud.google.com/sdk/docs/install) with Java 21 (no Google account or login needed).
 
 ```sh
-git clone https://github.com/edgorman/blog.gorman.club.git
-cd blog.gorman.club
+git clone https://github.com/<owner>/<repo>.git
+cd <repo>
 proto install                                      # moon, Go, Node, npm, buf, Terraform at the pinned versions
 gcloud components install cloud-firestore-emulator
 ```
@@ -27,11 +27,11 @@ Try it:
 ```sh
 auth=(-H 'Authorization: Bearer dev' -H 'Authorization-Provider: google' -H 'Content-Type: application/json')
 curl "${auth[@]}" -X PUT -d '{"username":"dev"}' localhost:8080/users/me
-curl "${auth[@]}" -X POST -d '{"title":"Hello","content":"First post","visibility":"public"}' localhost:8080/blogs
-curl localhost:8080/blogs
+curl "${auth[@]}" -X POST -d '{"title":"Hello","body":"First note","visibility":"public"}' localhost:8080/notes
+curl localhost:8080/notes
 ```
 
-The emulator starts empty each time, and with no model configured the writing assistant is off and search is a plain text match. More in "Running locally" in `services/backend/README.md`.
+The emulator starts empty each time. More in "Running locally" in `services/backend/README.md`.
 
 ## 3. Run the frontend
 
@@ -42,7 +42,7 @@ cd ../..
 moon run services/frontend:dev                               # Vite on http://localhost:5173
 ```
 
-The feed shows the post you just created. Signing in from the browser needs a Google client ID (see `services/frontend/README.md`); nothing else does.
+The feed shows the note you just created. Signing in from the browser needs a Google client ID (see `services/frontend/README.md`); nothing else does.
 
 ## 4. Run what CI runs
 

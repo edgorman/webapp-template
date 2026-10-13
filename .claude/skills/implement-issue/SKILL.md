@@ -1,6 +1,6 @@
 ---
 name: implement-issue
-description: Take one GitHub issue in edgorman/blog.gorman.club from issue to open pull request - read it and its parent, check its blockers are merged, implement it against its acceptance criteria, verify, and open the PR. Use when asked to implement, work on, or pick up an issue or sub-issue by number.
+description: Take one GitHub issue in this repository from issue to open pull request - read it and its parent, check its blockers are merged, implement it against its acceptance criteria, verify, and open the PR. Use when asked to implement, work on, or pick up an issue or sub-issue by number.
 argument-hint: <issue number>
 ---
 
@@ -12,10 +12,10 @@ Rules for the code itself are in the `AGENTS.md` of each area you touch, and CI 
 
 ## 1. Read before touching anything
 
-- Read the issue and its comments. If it has a parent, read that too: it usually holds the order of work (e.g. #190's chain table) and context the sub-issue leaves out.
+- Read the issue and its comments. If it has a parent, read that too: it usually holds the order of work (e.g. a chain table of sub-issues) and context the sub-issue leaves out.
 - **Blockers**: everything the issue or its parent says it depends on must be closed. If one is still open, stop and say which.
 - **Already taken**: if an open PR already closes this issue, stop and link it.
-- **Stale issues**: an issue is often written before the change that lands just ahead of it (#182 needed rewriting after #187 and the moon migration). Where it contradicts the current code or an `AGENTS.md`, follow the code and say so in the PR body. If the contradiction changes what should be built, stop and ask.
+- **Stale issues**: an issue is often written before the change that lands just ahead of it. Where it contradicts the current code or an `AGENTS.md`, follow the code and say so in the PR body. If the contradiction changes what should be built, stop and ask.
 
 ## 2. Implement
 

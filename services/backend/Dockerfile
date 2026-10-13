@@ -1,5 +1,5 @@
 # Multi-stage build for Cloud Run. COMMIT_SHA is baked in via -ldflags since images are never rebuilt after staging.
-# CMD picks the binary under cmd/: backend (the API) by default, or worker.
+# CMD picks the binary under cmd/: backend (the API) by default.
 FROM golang:1.26-alpine AS build
 WORKDIR /src
 

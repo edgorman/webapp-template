@@ -1,6 +1,6 @@
 ---
 name: steward
-description: This repo's conventions for driving a pull request to green - what each required check means, how to reproduce it locally, and which failures need the user. Use when watching, fixing CI on, or answering review on a PR in edgorman/blog.gorman.club.
+description: This repo's conventions for driving a pull request to green - what each required check means, how to reproduce it locally, and which failures need the user. Use when watching, fixing CI on, or answering review on a PR in this repository.
 ---
 
 # Stewarding a PR in this repo
@@ -31,7 +31,7 @@ All seven jobs of `.github/workflows/pull-request.yaml` and both jobs of `.githu
 | `lint-check` → `:validate` | `terraform validate` | Fix the HCL. You can't reproduce it locally, so read the log |
 | `lint-check` → `root:wire-types` | An `export interface` in `services/frontend/src/lib/api.ts`, or a `json:"..."` tag in `services/backend/internal/service` outside `debug.go` | Use the generated type from `src/gen` / `internal/gen`. If the type doesn't exist yet, add the message to a `.proto` |
 | `lint-check` → `root:projects-covered` | A `services/*` or `packages/*` folder has no `moon.yml` | Add one, modelled on a sibling |
-| `lint-check` → `root:go-version-sync` | `.prototools`'s `go` pin and `services/backend/go.mod`'s `go` line differ | Change both. Also bump `FROM golang:X-alpine` in `services/backend/Dockerfile` (#123) |
+| `lint-check` → `root:go-version-sync` | `.prototools`'s `go` pin and `services/backend/go.mod`'s `go` line differ | Change both. Also bump `FROM golang:X-alpine` in `services/backend/Dockerfile` |
 | `test` → `:test` | `go test` or Vitest | A real failure. Root-cause it |
 | `test` → `services/backend:image` | The Docker build | Usually a Go version or a file missing from the build context |
 | `protos-drift` | Generated code doesn't match the `.proto` | `cd packages/protos && buf generate`, then commit `services/backend/internal/gen` and `services/frontend/src/gen`. **Never hand-edit either folder** |
@@ -56,8 +56,8 @@ The plan job posts its output as a PR comment. Read it:
 - **Title**: a Conventional Commit (`feat(backend): ...`, `fix(ci): ...`). PRs are squash-merged with the PR title as the commit subject, and versioning is computed from that subject. Fix a non-conforming title on a PR you opened.
 - **Body**: follow `.github/PULL_REQUEST_TEMPLATE.md` (Summary, `Closes #`, Area checkboxes, Testing).
 - **`strict: true`**: the branch must be up to date with `main`. When it's behind, merge `origin/main` in. Never rebase or force-push; `allow_force_pushes: false` and squash merge keep `main` linear anyway.
-- **Approval**: one code-owner approval (`@edgorman`), and `dismiss_stale_reviews` is on, so any push drops it. Don't hold back a needed fix because of this. Once CI is green with no open threads, the PR is waiting on the owner and nothing else is yours to do.
-- **`mergeable_state: blocked` on a green PR is expected.** Claude Code pushes and opens PRs as `@edgorman`, and GitHub never lets an author approve their own PR, so the owner merges with the admin override (`enforce_admins: false`). Don't investigate it, and never propose dropping `required_pull_request_reviews` (#210, reverted by #211).
+- **Approval**: one code-owner approval (see `.github/CODEOWNERS`), and `dismiss_stale_reviews` is on, so any push drops it. Don't hold back a needed fix because of this. Once CI is green with no open threads, the PR is waiting on the owner and nothing else is yours to do.
+- **`mergeable_state: blocked` on a green PR is expected.** Claude Code pushes and opens PRs as the repository owner, and GitHub never lets an author approve their own PR, so the owner merges with the admin override (`enforce_admins: false`). Don't investigate it, and never propose dropping `required_pull_request_reviews`.
 - **`required_conversation_resolution`**: resolve every thread you've addressed, and reply on any you're not changing.
 
 ## Dependabot PRs

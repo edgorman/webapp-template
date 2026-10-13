@@ -25,7 +25,7 @@ resource "google_artifact_registry_repository" "backend" {
   cleanup_policy_dry_run = true
 
   # One KEEP policy per image, so each keeps its own backend_registry_keep_count versions however
-  # the count is applied across packages (#264). A second image under cmd/ gets its own copy.
+  # the count is applied across packages. A second image under cmd/ gets its own copy.
   cleanup_policies {
     id     = "keep-minimum-versions"
     action = "KEEP"
@@ -38,7 +38,7 @@ resource "google_artifact_registry_repository" "backend" {
 
   # Every image promoted to prod, whatever its age: promote-release.yaml tags it release-<version>
   # (e.g. release-v1.4.0) on top of its commit-SHA tag, so a rollback target never falls out of the
-  # most-recent window above however many merges land between promotions (#279).
+  # most-recent window above however many merges land between promotions.
   cleanup_policies {
     id     = "keep-releases"
     action = "KEEP"
