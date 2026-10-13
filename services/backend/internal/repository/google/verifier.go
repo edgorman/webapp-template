@@ -8,8 +8,8 @@ import (
 
 	"google.golang.org/api/idtoken"
 
-	"github.com/edgorman/blog.gorman.club/services/backend/internal/entity"
-	"github.com/edgorman/blog.gorman.club/services/backend/internal/repository"
+	"github.com/edgorman/webapp-template/services/backend/internal/entity"
+	"github.com/edgorman/webapp-template/services/backend/internal/repository"
 )
 
 // Google mints ID tokens with either issuer.

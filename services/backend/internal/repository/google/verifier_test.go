@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/edgorman/blog.gorman.club/services/backend/internal/repository"
+	"github.com/edgorman/webapp-template/services/backend/internal/repository"
 )
 
 // An unset client ID is reported distinctly so the service can answer 500 (an operator problem)

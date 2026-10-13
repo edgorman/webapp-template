@@ -45,7 +45,7 @@ tasks:
     command: 'go run ./cmd/backend'
     env:
       FIRESTORE_EMULATOR_HOST: '127.0.0.1:8081'
-      GOOGLE_CLOUD_PROJECT: 'demo-blog-gorman-club'
+      GOOGLE_CLOUD_PROJECT: 'demo-app'
       ENVIRONMENT: 'local'
       DEV_AUTH: 'true'
     preset: 'server'

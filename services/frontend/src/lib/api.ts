@@ -2,30 +2,20 @@
  * Client for the backend API (see /services/backend). Callers pass the header map from
  * useGoogleAuth, so this module knows nothing about any auth provider.
  *
- * Wire types come from `src/gen` rather than being declared here - see packages/protos/AGENTS.md's "Contract
- * Layer". `User`/`CurrentUser` moved in #169, `Blog`/`BlogPage`/`ListBlogsParams` in #170,
- * `Comment`/`ReactionCount`/`PageReactions` in #171, `ChatMessage`/`ChatEdit`/`ChatRequest`/
- * `ChatReply` in #172, and the shared `ErrorResponse` envelope in #173, which also closed the
- * sweep: this file declares no `export interface` of its own, and CI fails a PR that adds one back
- * (see the "Wire Types" step in `.github/workflows/pull-request.yaml`).
+ * Wire types come from `src/gen` rather than being declared here - see packages/protos/AGENTS.md's
+ * "Contract Layer". This file declares no `export interface` of its own, and CI fails a PR that
+ * adds one (`root:wire-types`).
  */
-import type { CurrentUser, User } from '../gen/blog/v1/user'
-import type { Blog, BlogPage, ListBlogsParams, RelatedPosts } from '../gen/blog/v1/blog'
-import type { Comment, CommentThread, CreateCommentRequest } from '../gen/blog/v1/comment'
-import type { PageReactions, TargetReactions } from '../gen/blog/v1/reaction'
-import type { ChatHistory, ChatReply, ChatRequest } from '../gen/blog/v1/chat'
-import type { ErrorResponse } from '../gen/blog/v1/error'
+import type { CurrentUser, UpdateCurrentUserRequest, User } from '../gen/app/v1/user'
+import type { ListNotesParams, Note, NotePage, NoteRequest } from '../gen/app/v1/note'
+import type { ErrorResponse } from '../gen/app/v1/error'
 
-export type { User, CurrentUser } from '../gen/blog/v1/user'
-export type { Blog, BlogPage, ListBlogsParams } from '../gen/blog/v1/blog'
-export type { Comment } from '../gen/blog/v1/comment'
-export type { ReactionCount, PageReactions, TargetReactions } from '../gen/blog/v1/reaction'
-export type { ChatMessage, ChatEdit, ChatRequest, ChatReply } from '../gen/blog/v1/chat'
+export type { User, CurrentUser } from '../gen/app/v1/user'
+export type { Note, NotePage, ListNotesParams, NoteRequest } from '../gen/app/v1/note'
 
 /**
- * "public" or "private" - what a post's `visibility` actually holds, kept as a union here rather
- * than derived from `Blog['visibility']`: the proto field is a plain string (see `packages/protos/AGENTS.md`'s
- * "Contract Layer" for why), so the generated `Blog` type carries no such constraint of its own.
+ * "public" or "private" - what a note's `visibility` actually holds, kept as a union here because
+ * the proto field is a plain string (see `packages/protos/AGENTS.md`'s "Contract Layer").
  */
 export type Visibility = 'public' | 'private'
 
@@ -45,41 +35,19 @@ export function errorMessage(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : fallback
 }
 
-/**
- * The path a post lives at. The slug is escaped even though it is URL-safe by construction: it
- * arrives from the API, which is not this module's to trust.
- */
-export function postPath(post: Pick<Blog, 'slug'>): string {
-  return `/post/${encodeURIComponent(post.slug)}`
+/** The path a note lives at in the app. The id is escaped: it arrives from the API. */
+export function notePath(note: Pick<Note, 'id'>): string {
+  return `/note/${encodeURIComponent(note.id)}`
 }
 
 /**
  * Whether the signed-in caller wrote something attributed to username. Usernames are unique and a
- * post or comment resolves its author's on every read, so this is the "is it mine" check the wire
- * leaves a client - it is never sent a uid to compare (#253). Only for what to show: the backend
- * decides every write itself.
+ * note resolves its author's on every read, so this is the "is it mine" check the wire leaves a
+ * client - it is never sent a uid to compare. Only for what to show: the backend decides every
+ * write itself.
  */
 export function isAuthor(profile: CurrentUser | null, username: string): boolean {
   return !!profile && !!username && profile.username === username
-}
-
-/**
- * The path a profile lives at, or null for an author with no username and so no page. Escaped for
- * the same reason `postPath` escapes a slug.
- */
-export function userPath(username: string): string | null {
-  if (!username) return null
-  return `/user/${encodeURIComponent(username)}`
-}
-
-/**
- * The feed filtered to one topic, which is where a tag chip links. Tags live in the feed's query
- * string rather than at a path of their own: a tag is one way of narrowing the feed, alongside the
- * search box beside it, rather than a page in its own right - so the two compose in the URL and
- * both survive a reload and a shared link.
- */
-export function tagPath(tag: string): string {
-  return `/?tag=${encodeURIComponent(tag)}`
 }
 
 export type AuthHeaders = Record<string, string>
@@ -112,8 +80,7 @@ async function send<T>(
   }
 
   if (!response.ok) {
-    // Every non-2xx response is an ErrorResponse (see `packages/protos/AGENTS.md`'s "Contract Layer"), but fall back
-    // to the status if parsing it fails for any reason.
+    // Every non-2xx response is an ErrorResponse, but fall back to the status if parsing it fails.
     const message = await response
       .json()
       .then((body: ErrorResponse) => body.error)
@@ -125,123 +92,39 @@ async function send<T>(
   return response.json() as Promise<T>
 }
 
-/** The API path for a page of `GET /blogs`, carrying only the params a caller actually set. */
-function blogsListPath(params: ListBlogsParams = {}): string {
+/** The API path for a page of `GET /notes`, carrying only the params a caller actually set. */
+function notesListPath(params: ListNotesParams = {}): string {
   const query = new URLSearchParams()
   if (params.limit !== undefined) query.set('limit', String(params.limit))
   if (params.startAfter) query.set('startAfter', params.startAfter)
-  if (params.author) query.set('author', params.author)
-  if (params.tag) query.set('tag', params.tag)
-  if (params.q) query.set('q', params.q)
 
   const search = query.toString()
-  return search ? `/blogs?${search}` : '/blogs'
+  return search ? `/notes?${search}` : '/notes'
 }
 
-/** The API path for one post, as `postPath` is its route in the console. */
-function blogPath(slug: string): string {
-  return `/blogs/${encodeURIComponent(slug)}`
-}
-
-/** The API path for one post's comments. */
-function commentsPath(slug: string): string {
-  return `${blogPath(slug)}/comments`
-}
-
-/**
- * The API path for one reaction: the thing reacted to, then the emoji. The emoji is escaped like
- * any other path segment - it is not URL-safe by construction the way a slug is.
- */
-function reactionPath(slug: string, emoji: string, commentId?: string): string {
-  const target = commentId === undefined ? blogPath(slug) : `${commentsPath(slug)}/${encodeURIComponent(commentId)}`
-  return `${target}/reactions/${encodeURIComponent(emoji)}`
-}
-
-/** The API path for one post's assistant conversation. */
-function chatPath(slug: string): string {
-  return `${blogPath(slug)}/chat`
+function noteApiPath(id: string): string {
+  return `/notes/${encodeURIComponent(id)}`
 }
 
 export function createApi(baseUrl: string, authHeaders: AuthHeaders, onUnauthorized?: () => void) {
   // Every call below goes through this, so each one ends the session on a refused credential.
-  function request<T>(base: string, headers: AuthHeaders, method: string, path: string, body?: unknown) {
-    return send<T>(base, headers, method, path, body, onUnauthorized)
+  function request<T>(method: string, path: string, body?: unknown) {
+    return send<T>(baseUrl, authHeaders, method, path, body, onUnauthorized)
   }
   return {
-    listBlogs: (params?: ListBlogsParams) =>
-      request<BlogPage>(baseUrl, authHeaders, 'GET', blogsListPath(params)),
-    // A post is addressed by its slug alone, since slugs are unique across every author:
-    // "hello-world" names at most one post anywhere, and the second post under that title is
-    // suffixed instead. The uid a post records its owner by is never a URL, exactly as for a
-    // profile.
-    getBlog: (slug: string) => request<Blog>(baseUrl, authHeaders, 'GET', blogPath(slug)),
-    // The posts nearest in meaning to this one, already narrowed to what the caller may read, and
-    // empty until the worker has embedded the post. Unwrapped from `RelatedPosts` for the same
-    // top-level-message reason `CommentThread` is below.
-    getRelatedBlogs: (slug: string) =>
-      request<RelatedPosts>(baseUrl, authHeaders, 'GET', `${blogPath(slug)}/related`).then((related) => related.posts),
-    createBlog: (blog: Partial<Blog>) => request<Blog>(baseUrl, authHeaders, 'POST', '/blogs', blog),
-    updateBlog: (slug: string, blog: Partial<Blog>) =>
-      request<Blog>(baseUrl, authHeaders, 'PUT', blogPath(slug), blog),
-    deleteBlog: (slug: string) => request<void>(baseUrl, authHeaders, 'DELETE', blogPath(slug)),
+    listNotes: (params?: ListNotesParams) => request<NotePage>('GET', notesListPath(params)),
+    getNote: (id: string) => request<Note>('GET', noteApiPath(id)),
+    createNote: (note: NoteRequest) => request<Note>('POST', '/notes', note),
+    updateNote: (id: string, note: NoteRequest) => request<Note>('PUT', noteApiPath(id), note),
+    deleteNote: (id: string) => request<void>('DELETE', noteApiPath(id)),
 
     // A profile is addressed by its username; the Google sub it is keyed by is never a URL.
-    getUser: (username: string) =>
-      request<User>(baseUrl, authHeaders, 'GET', `/users/${encodeURIComponent(username)}`),
+    getUser: (username: string) => request<User>('GET', `/users/${encodeURIComponent(username)}`),
     // The caller's own profile needs no name: the backend takes the owner from the credential,
     // which is also how a client discovers the username it was given at sign-up.
-    getCurrentUser: () => request<CurrentUser>(baseUrl, authHeaders, 'GET', '/users/me'),
-    putUser: (user: Partial<User>) =>
-      request<CurrentUser>(baseUrl, authHeaders, 'PUT', '/users/me', user),
-    deleteUser: () => request<void>(baseUrl, authHeaders, 'DELETE', '/users/me'),
-
-    // Comments hang off their post like the chat below, but they are the readers' half of it: the
-    // thread is readable by exactly whoever may read the post - signed out included, for a public
-    // one - while writing to it needs a credential, since a comment is signed by whoever left it.
-    //
-    // `GET .../comments` answers with a `CommentThread` rather than a bare array - protojson can
-    // only marshal a message at the top level (see `packages/protos/AGENTS.md`'s "Contract Layer") - so the list is
-    // unwrapped here, and every other caller still sees a plain `Comment[]`.
-    listComments: (slug: string) =>
-      request<CommentThread>(baseUrl, authHeaders, 'GET', commentsPath(slug)).then((thread) => thread.comments),
-    createComment: (slug: string, body: string) =>
-      request<Comment>(baseUrl, authHeaders, 'POST', commentsPath(slug), { body } satisfies CreateCommentRequest),
-    // Deleting is allowed for the comment's author and for the post's owner, who moderates their
-    // own post; the backend decides, and answers a 403 for anybody else.
-    deleteComment: (slug: string, id: string) =>
-      request<void>(baseUrl, authHeaders, 'DELETE', `${commentsPath(slug)}/${encodeURIComponent(id)}`),
-    // Approving overrules the classifier on a flagged comment, which only the post's owner may.
-    approveComment: (slug: string, id: string) =>
-      request<Comment>(baseUrl, authHeaders, 'PUT', `${commentsPath(slug)}/${encodeURIComponent(id)}/moderation`),
-
-    // Reactions are read for the whole page at once and written one at a time. A write is
-    // addressed rather than toggled - PUT puts the reaction there, DELETE takes it back - so a
-    // retried click or a stale page lands where it was aiming instead of undoing itself. Both
-    // answer with the target's counts as they now stand (wrapped in a `TargetReactions`, for the
-    // same top-level-message reason `CommentThread` wraps a list above), since a bar is a shared
-    // number that this client's own click cannot predict.
-    getReactions: (slug: string) =>
-      request<PageReactions>(baseUrl, authHeaders, 'GET', `${blogPath(slug)}/reactions`),
-    addReaction: (slug: string, emoji: string, commentId?: string) =>
-      request<TargetReactions>(baseUrl, authHeaders, 'PUT', reactionPath(slug, emoji, commentId)).then(
-        (target) => target.reactions,
-      ),
-    removeReaction: (slug: string, emoji: string, commentId?: string) =>
-      request<TargetReactions>(baseUrl, authHeaders, 'DELETE', reactionPath(slug, emoji, commentId)).then(
-        (target) => target.reactions,
-      ),
-
-    // The assistant conversation hangs off the post it is about, since that is all a chat is: it
-    // has no identity apart from its post. Every one of these requires the caller to own the post
-    // and to have the assistant enabled.
-    //
-    // `GET .../chat` answers with a `ChatHistory` for the same top-level-message reason
-    // `CommentThread` wraps a list above; unlike those, its `messages` field is what every caller
-    // already wants, so it is returned as-is rather than unwrapped.
-    getChat: (slug: string) => request<ChatHistory>(baseUrl, authHeaders, 'GET', chatPath(slug)),
-    sendChatMessage: (slug: string, body: ChatRequest) =>
-      request<ChatReply>(baseUrl, authHeaders, 'POST', chatPath(slug), body),
-    clearChat: (slug: string) => request<void>(baseUrl, authHeaders, 'DELETE', chatPath(slug)),
+    getCurrentUser: () => request<CurrentUser>('GET', '/users/me'),
+    putUser: (user: Partial<UpdateCurrentUserRequest>) => request<CurrentUser>('PUT', '/users/me', user),
+    deleteUser: () => request<void>('DELETE', '/users/me'),
   }
 }
 

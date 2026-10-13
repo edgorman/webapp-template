@@ -15,9 +15,8 @@
 # React renders (an inline style cannot execute script, unlike an inline script).
 #
 # Adding a third-party script, frame or connection here (analytics, embeds, anything that can set
-# cookies or read the page) means updating the cookie notice on /privacy (src/pages/Privacy.tsx)
-# and adding a consent step first: the site has no consent banner only because everything it
-# stores today is strictly necessary or a preference the visitor set (#238).
+# cookies or read the page) means adding a consent step first: the site has no consent banner only
+# because everything it stores today is strictly necessary or a preference the visitor set.
 #
 # If sign-in, fonts, or API calls ever break after a change here, rename the header to
 # Content-Security-Policy-Report-Only, reload, and read the violations off the browser console -

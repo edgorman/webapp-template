@@ -3,7 +3,7 @@ package repository
 import (
 	"context"
 
-	"github.com/edgorman/blog.gorman.club/services/backend/internal/entity"
+	"github.com/edgorman/webapp-template/services/backend/internal/entity"
 )
 
 // TokenVerifier checks a provider-issued ID token with that provider and returns the identity it

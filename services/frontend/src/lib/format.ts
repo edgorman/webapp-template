@@ -9,30 +9,18 @@ export function formatDate(iso: string): string {
   return DATE_FORMAT.format(new Date(iso))
 }
 
-const SNIPPET_LENGTH = 160
-
-/** Strips the most common markdown syntax and truncates, for a feed-row preview of the content. */
-export function snippetFrom(content: string): string {
-  const plain = content
-    .replace(/```[\s\S]*?```/g, ' ')
-    .replace(/!\[[^\]]*]\([^)]*\)/g, ' ')
-    .replace(/\[([^\]]*)]\([^)]*\)/g, '$1')
-    .replace(/[#>*_`~-]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-
-  if (plain.length <= SNIPPET_LENGTH) return plain
-  return `${plain.slice(0, SNIPPET_LENGTH).trimEnd()}…`
+/**
+ * A note's body as one line of at most `max` characters, for a feed row and a page description.
+ * `public/_worker.js` keeps its own copy, since it ships as-is rather than through Vite; change both
+ * together.
+ */
+export function snippetFrom(body: string, max = 160): string {
+  const plain = body.replace(/\s+/g, ' ').trim()
+  if (plain.length <= max) return plain
+  return `${plain.slice(0, max - 1).trimEnd()}…`
 }
 
-export const GITHUB_REPO = 'edgorman/blog.gorman.club'
-
-/**
- * Links a release tag (e.g. "v1.2.3", written into config.json by the deploy pipeline - see
- * `.github/AGENTS.md`'s Versioning and Staging Deployments sections) to its GitHub Releases page. Works for
- * a still-accumulating pre-release on staging and a promoted one on production alike, since both
- * live at this same URL shape.
- */
-export function releaseUrl(tag: string): string {
-  return `https://github.com/${GITHUB_REPO}/releases/tag/${tag}`
+/** Links a release tag (e.g. "v1.2.3", from config.json) to its GitHub Releases page. */
+export function releaseUrl(githubRepo: string, tag: string): string {
+  return `https://github.com/${githubRepo}/releases/tag/${tag}`
 }

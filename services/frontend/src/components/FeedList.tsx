@@ -1,47 +1,30 @@
 import { Link } from 'react-router-dom'
-import { TagList } from './TagList'
-import { postPath, type Blog } from '../lib/api'
+import { notePath, type Note } from '../lib/api'
 import { formatDate, snippetFrom } from '../lib/format'
 
-interface Props {
-  posts: Blog[]
-}
-
-/** The recent-posts list shared by the landing feed and a profile's feed. */
-export function FeedList({ posts }: Props) {
+/** The newest-first list of notes on the landing page. */
+export function FeedList({ notes }: { notes: Note[] }) {
   return (
     <div>
-      {posts.map((post, i) => (
-        // A slug names one post anywhere, so it identifies a row on its own.
-        <FeedRow key={post.slug} post={post} delayMs={i * 20} />
+      {notes.map((note, i) => (
+        <FeedRow key={note.id} note={note} delayMs={i * 20} />
       ))}
     </div>
   )
 }
 
-function FeedRow({ post, delayMs }: { post: Blog; delayMs: number }) {
-  const author = post.authorUsername
-  const href = postPath(post)
-
-  const body = (
-    <>
+function FeedRow({ note, delayMs }: { note: Note; delayMs: number }) {
+  return (
+    <Link to={notePath(note)} className="feed-row" style={{ animationDelay: `${delayMs}ms` }}>
       <div className="feed-row-meta">
         {/* Optional because the wire says so: createdAt is a google.protobuf.Timestamp, and
-            protojson may leave a message field out of the body - see api.ts's Blog. */}
-        {post.createdAt && <span className="text-muted feed-row-date">{formatDate(post.createdAt)}</span>}
-        {author && <span className="text-muted feed-row-author">{author}</span>}
-        {post.visibility === 'private' && <span className="tag tag-outline">private</span>}
+            protojson may leave a message field out of the body. */}
+        {note.createdAt && <span className="text-muted feed-row-date">{formatDate(note.createdAt)}</span>}
+        {note.authorUsername && <span className="text-muted feed-row-author">{note.authorUsername}</span>}
+        {note.visibility === 'private' && <span className="tag tag-outline">private</span>}
       </div>
-      <h2 className="feed-title">{post.title || '(untitled)'}</h2>
-      <p className="text-muted feed-snippet">{snippetFrom(post.content)}</p>
-      <TagList tags={post.tags} />
-    </>
-  )
-  const style = { animationDelay: `${delayMs}ms` }
-
-  return (
-    <Link to={href} className="feed-row" style={style}>
-      {body}
+      <h2 className="feed-title">{note.title || '(untitled)'}</h2>
+      <p className="text-muted feed-snippet">{snippetFrom(note.body)}</p>
     </Link>
   )
 }

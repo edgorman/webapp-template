@@ -1,0 +1,55 @@
+syntax = "proto3";
+
+package app.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/edgorman/webapp-template/services/backend/internal/gen/app/v1;appv1";
+
+// Note is the template's example resource as a client sees it - what `GET /notes/{id}` and every
+// other read of a single note answer with, and what each entry of NotePage.notes is. Copy its
+// shape for a new resource: a wire message, a page, and a request holding the client-settable half.
+//
+// It is the wire shape, not entity.Note: author_username is resolved server-side and the owner's
+// uid, which is never public, has no field here.
+message Note {
+  string id = 1;
+  // The owner's username, resolved on read rather than stored, so a rename reaches every note at
+  // once. A client compares it with CurrentUser.username to tell its own notes. Empty for a note
+  // whose owner holds no profile.
+  string author_username = 2;
+  string title = 3;
+  string body = 4;
+  // "public" or "private" - see the "Contract Layer" section of `packages/protos/AGENTS.md` for
+  // why this is a plain string rather than a proto enum.
+  string visibility = 5;
+  google.protobuf.Timestamp created_at = 6;
+  google.protobuf.Timestamp updated_at = 7;
+}
+
+// NotePage is one page of `GET /notes`, newest first. A caller continues by sending the createdAt
+// of the last note here back as ListNotesParams.start_after.
+message NotePage {
+  repeated Note notes = 1;
+  // A plain bool rather than optional, so the last page still carries `hasMore: false` on the wire.
+  bool has_more = 2;
+}
+
+// ListNotesParams is what `GET /notes` pages by. It never crosses the wire as JSON - the backend
+// reads a query string - and exists only to give the frontend one generated type for the params
+// it sends.
+message ListNotesParams {
+  // How many notes a page holds. The backend applies its own default and cap when omitted.
+  optional int32 limit = 1;
+  // Continues a previous page: the createdAt of the last note the previous one held.
+  optional string start_after = 2;
+}
+
+// NoteRequest is the body of both `POST /notes` and `PUT /notes/{id}`. The id, the owner and the
+// timestamps are decided by the server, so none of them are here.
+message NoteRequest {
+  string title = 1;
+  string body = 2;
+  // "public" or "private".
+  string visibility = 3;
+}

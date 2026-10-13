@@ -2,7 +2,7 @@ package entity
 
 import "testing"
 
-// The three modes are the whole scale, and each one admits exactly who it says it does. The zero
+// The two modes are the whole scale, and each one admits exactly who it says it does. The zero
 // uid is the anonymous caller and holds nothing but public access, which is the one way this could
 // have failed open: an ownerless thing must not make a signed-out request its owner.
 func TestPermission_Allows(t *testing.T) {
@@ -17,26 +17,6 @@ func TestPermission_Allows(t *testing.T) {
 		{"private admits its owner", Permission{Access: AccessPrivate, OwnerID: "owner"}, "owner", true},
 		{"private refuses a stranger", Permission{Access: AccessPrivate, OwnerID: "owner"}, "stranger", false},
 		{"private refuses the anonymous caller", Permission{Access: AccessPrivate}, "", false},
-		{
-			"a whitelist admits its owner",
-			Permission{Access: AccessWhitelist, OwnerID: "owner", AllowedUserIDs: []string{"friend"}},
-			"owner", true,
-		},
-		{
-			"a whitelist admits a named uid",
-			Permission{Access: AccessWhitelist, OwnerID: "owner", AllowedUserIDs: []string{"friend"}},
-			"friend", true,
-		},
-		{
-			"a whitelist refuses everybody else",
-			Permission{Access: AccessWhitelist, OwnerID: "owner", AllowedUserIDs: []string{"friend"}},
-			"stranger", false,
-		},
-		{
-			"a whitelist naming nobody refuses the anonymous caller",
-			Permission{Access: AccessWhitelist, AllowedUserIDs: []string{""}},
-			"", false,
-		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := tt.permission.Allows(tt.uid); got != tt.want {
@@ -50,7 +30,7 @@ func TestPermission_Allows(t *testing.T) {
 // That is what makes adding a resource without a line in the table a closed feature rather than a
 // hole, and it holds for a caller who owns the thing as much as for a stranger.
 func TestPermissionFor_UndeclaredPairsDenyEverybody(t *testing.T) {
-	permission := PermissionFor(ResourceComment, ActionUpdate)
+	permission := PermissionFor(ResourceUser, ActionCreate)
 	permission.OwnerID = "owner"
 
 	if permission.Access.Valid() {

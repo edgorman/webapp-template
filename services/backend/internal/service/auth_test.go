@@ -6,13 +6,13 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/edgorman/blog.gorman.club/services/backend/internal/entity"
-	"github.com/edgorman/blog.gorman.club/services/backend/internal/repository"
+	"github.com/edgorman/webapp-template/services/backend/internal/entity"
+	"github.com/edgorman/webapp-template/services/backend/internal/repository"
 )
 
 // authedRequest builds a request carrying both headers a verified call needs.
 func authedRequest(token string) *http.Request {
-	req := httptest.NewRequest(http.MethodGet, "/blogs", nil)
+	req := httptest.NewRequest(http.MethodGet, "/notes", nil)
 	req.Header.Set(authorizationHeader, bearerPrefix+token)
 	req.Header.Set(authorizationProviderHeader, string(providerGoogle))
 	return req
@@ -25,7 +25,7 @@ func TestRequireAuth_MissingHeader(t *testing.T) {
 	})
 
 	rec := httptest.NewRecorder()
-	handler(rec, httptest.NewRequest(http.MethodGet, "/blogs", nil))
+	handler(rec, httptest.NewRequest(http.MethodGet, "/notes", nil))
 
 	if called {
 		t.Fatal("next handler should not be called without a bearer token")
@@ -73,7 +73,7 @@ func TestRequireAuth_MissingProviderHeader(t *testing.T) {
 		t.Fatal("next handler should not be called without a provider header")
 	})
 
-	req := httptest.NewRequest(http.MethodGet, "/blogs", nil)
+	req := httptest.NewRequest(http.MethodGet, "/notes", nil)
 	req.Header.Set(authorizationHeader, bearerPrefix+"good-token")
 	rec := httptest.NewRecorder()
 	handler(rec, req)
@@ -89,7 +89,7 @@ func TestRequireAuth_UnsupportedProvider(t *testing.T) {
 		t.Fatal("next handler should not be called for an unsupported provider")
 	})
 
-	req := httptest.NewRequest(http.MethodGet, "/blogs", nil)
+	req := httptest.NewRequest(http.MethodGet, "/notes", nil)
 	req.Header.Set(authorizationHeader, bearerPrefix+"good-token")
 	req.Header.Set(authorizationProviderHeader, "facebook")
 	rec := httptest.NewRecorder()
@@ -106,7 +106,7 @@ func TestRequireAuth_MalformedAuthorizationHeader(t *testing.T) {
 		t.Fatal("next handler should not be called for a malformed header")
 	})
 
-	req := httptest.NewRequest(http.MethodGet, "/blogs", nil)
+	req := httptest.NewRequest(http.MethodGet, "/notes", nil)
 	req.Header.Set(authorizationHeader, "Basic dXNlcjpwYXNz")
 	req.Header.Set(authorizationProviderHeader, string(providerGoogle))
 	rec := httptest.NewRecorder()
@@ -157,7 +157,7 @@ func TestOptionalAuth_MissingHeaderRunsAnonymously(t *testing.T) {
 	})
 
 	rec := httptest.NewRecorder()
-	handler(rec, httptest.NewRequest(http.MethodGet, "/blogs", nil))
+	handler(rec, httptest.NewRequest(http.MethodGet, "/notes", nil))
 
 	if !called {
 		t.Fatal("next handler should be called for a request with no credential")
@@ -208,7 +208,7 @@ func TestOptionalAuth_MalformedAuthorizationHeaderIsRejected(t *testing.T) {
 		t.Fatal("next handler should not be called for a malformed header")
 	})
 
-	req := httptest.NewRequest(http.MethodGet, "/blogs", nil)
+	req := httptest.NewRequest(http.MethodGet, "/notes", nil)
 	req.Header.Set(authorizationHeader, "Basic dXNlcjpwYXNz")
 	rec := httptest.NewRecorder()
 	handler(rec, req)

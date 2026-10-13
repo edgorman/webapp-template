@@ -3,8 +3,8 @@ package main
 import (
 	"testing"
 
-	"github.com/edgorman/blog.gorman.club/services/backend/internal/repository/devauth"
-	"github.com/edgorman/blog.gorman.club/services/backend/internal/repository/google"
+	"github.com/edgorman/webapp-template/services/backend/internal/repository/devauth"
+	"github.com/edgorman/webapp-template/services/backend/internal/repository/google"
 )
 
 // The development verifier signs anybody in as anybody, so every environment but local must refuse

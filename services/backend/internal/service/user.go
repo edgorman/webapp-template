@@ -8,9 +8,9 @@ import (
 
 	"google.golang.org/protobuf/types/known/timestamppb"
 
-	"github.com/edgorman/blog.gorman.club/services/backend/internal/entity"
-	blogv1 "github.com/edgorman/blog.gorman.club/services/backend/internal/gen/blog/v1"
-	"github.com/edgorman/blog.gorman.club/services/backend/internal/repository"
+	"github.com/edgorman/webapp-template/services/backend/internal/entity"
+	appv1 "github.com/edgorman/webapp-template/services/backend/internal/gen/app/v1"
+	"github.com/edgorman/webapp-template/services/backend/internal/repository"
 )
 
 // usernameAttempts bounds how many names a profile without one draws before giving up. Each draw
@@ -22,7 +22,7 @@ const usernameAttempts = 5
 // user. An omitted username leaves whatever the profile already holds in place, so a client
 // editing only its bio keeps the name it was given at sign-up without having to echo it back -
 // which is what the request message's `optional username` buys and a bare string could not.
-func applyUpdate(req *blogv1.UpdateCurrentUserRequest, user *entity.User) error {
+func applyUpdate(req *appv1.UpdateCurrentUserRequest, user *entity.User) error {
 	candidate := *user
 	if req.Username != nil {
 		if err := candidate.SetUsername(req.GetUsername()); err != nil {
@@ -37,10 +37,10 @@ func applyUpdate(req *blogv1.UpdateCurrentUserRequest, user *entity.User) error 
 	return nil
 }
 
-// userMessage is the public profile as anybody may read it. SubscribedUntil is absent from
-// blogv1.User entirely rather than skipped here, so a lookup cannot disclose it by oversight.
-func userMessage(user entity.User) *blogv1.User {
-	return &blogv1.User{
+// userMessage is the public profile as anybody may read it. The account's id is absent from
+// appv1.User entirely rather than skipped here, so a lookup cannot disclose it by oversight.
+func userMessage(user entity.User) *appv1.User {
+	return &appv1.User{
 		Username:  user.Username,
 		Bio:       user.Bio,
 		CreatedAt: timestamppb.New(user.CreatedAt),
@@ -48,31 +48,15 @@ func userMessage(user entity.User) *blogv1.User {
 	}
 }
 
-// currentUser pairs a profile with what the account behind it may do. The capability is asked of
-// the entitlement rather than computed here, so a client is told exactly what the chat routes
-// would enforce (see entity.AssistantEntitlement). It needs nothing but the profile: the
-// subscription is on it, and the account it belongs to is its own id.
-//
-// The capability rides on /users/me rather than on a route of its own because it is a property of
-// the caller a client has just identified, and because it belongs nowhere else: a public profile
-// must not disclose who has the assistant. SubscribedUntil travels the same way - an account may
-// see when its own paid access runs out, and nobody else's lookup ever carries it.
-func (s *Service) currentUser(user entity.User) *blogv1.CurrentUser {
-	message := &blogv1.CurrentUser{
-		Id:               user.ID,
-		Username:         user.Username,
-		Bio:              user.Bio,
-		CreatedAt:        timestamppb.New(user.CreatedAt),
-		UpdatedAt:        timestamppb.New(user.UpdatedAt),
-		AssistantEnabled: s.cfg.AssistantEntitlement.Permission(entity.ActionUpdate, user).Allows(user.ID),
+// currentUserMessage is the caller's own profile, which alone carries the account's id.
+func currentUserMessage(user entity.User) *appv1.CurrentUser {
+	return &appv1.CurrentUser{
+		Id:        user.ID,
+		Username:  user.Username,
+		Bio:       user.Bio,
+		CreatedAt: timestamppb.New(user.CreatedAt),
+		UpdatedAt: timestamppb.New(user.UpdatedAt),
 	}
-	// Left nil for an account that has never subscribed, so the field stays absent from the body
-	// rather than arriving as null - which is what it does today and what EmitDefaultValues
-	// preserves (see writeProto).
-	if user.SubscribedUntil != nil {
-		message.SubscribedUntil = timestamppb.New(*user.SubscribedUntil)
-	}
-	return message
 }
 
 // GetCurrentUser returns the caller's own profile. It exists because a client holds a credential,
@@ -89,7 +73,7 @@ func (s *Service) GetCurrentUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeProto(w, http.StatusOK, s.currentUser(user))
+	writeProto(w, http.StatusOK, currentUserMessage(user))
 }
 
 // GetUser returns the profile holding a username. Any caller, signed in or not, may read any
@@ -120,13 +104,13 @@ func (s *Service) GetUser(w http.ResponseWriter, r *http.Request) {
 	writeProto(w, http.StatusOK, userMessage(user))
 }
 
-// saveUser writes the profile through put (Put, or Create for a profile that must be new), naming it first when it has none - which is every profile at
+// saveUser writes the profile, naming it first when it has none - which is every profile at
 // sign-up, since clients are not asked to choose. Only the write can tell whether a name is free,
 // so a collision is answered by drawing another rather than by checking beforehand, which would be
 // slower and still racy.
-func (s *Service) saveUser(ctx context.Context, user entity.User, put func(context.Context, entity.User) (entity.User, error)) (entity.User, error) {
+func (s *Service) saveUser(ctx context.Context, user entity.User) (entity.User, error) {
 	if user.Username != "" {
-		return put(ctx, user)
+		return s.users.Put(ctx, user)
 	}
 
 	var err error
@@ -134,7 +118,7 @@ func (s *Service) saveUser(ctx context.Context, user entity.User, put func(conte
 		user.Username = entity.NewUsername()
 
 		var saved entity.User
-		if saved, err = put(ctx, user); !errors.Is(err, repository.ErrUsernameTaken) {
+		if saved, err = s.users.Put(ctx, user); !errors.Is(err, repository.ErrUsernameTaken) {
 			return saved, err
 		}
 	}
@@ -151,7 +135,7 @@ func (s *Service) saveUser(ctx context.Context, user entity.User, put func(conte
 func (s *Service) PutUser(w http.ResponseWriter, r *http.Request) {
 	id := uidFromContext(r.Context())
 
-	var body blogv1.UpdateCurrentUserRequest
+	var body appv1.UpdateCurrentUserRequest
 	if !readProto(w, r, &body) {
 		return
 	}
@@ -169,7 +153,7 @@ func (s *Service) PutUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	saved, err := s.saveUser(r.Context(), user, s.users.Put)
+	saved, err := s.saveUser(r.Context(), user)
 	if errors.Is(err, repository.ErrUsernameTaken) {
 		writeError(w, http.StatusConflict, "username already taken")
 		return
@@ -184,21 +168,16 @@ func (s *Service) PutUser(w http.ResponseWriter, r *http.Request) {
 		status = http.StatusCreated
 	}
 	// The same shape GetCurrentUser answers with, so a client that has just created its profile
-	// learns what it may do without a second request.
-	writeProto(w, status, s.currentUser(saved))
+	// learns the name it was given without a second request.
+	writeProto(w, status, currentUserMessage(saved))
 }
 
-// DeleteUser erases the caller's account: every post it wrote (with the comments, reactions and
-// assistant chat on them), every comment and reaction it left on anybody else's post, and then the
-// profile. It is addressed as /users/me for the same reason PutUser is: the owner comes from the
-// credential, so only the owner can ever be the target.
+// DeleteUser erases the caller's account: every note it wrote, then the profile. It is addressed
+// as /users/me for the same reason PutUser is: the owner comes from the credential, so only the
+// owner can ever be the target.
 //
-// The erasure runs in the request rather than in the worker. An account here holds tens of posts,
-// not millions, so it fits comfortably inside one request, and the caller learns it is done rather
-// than being told it has started. Every step is idempotent and the profile goes last, so a request
-// that fails partway is finished by sending it again: the profile is still there to be found, and
-// whatever was already erased is simply not found twice. Post embeddings are the worker's to erase,
-// which it does when a post's document is deleted (see internal/worker).
+// Every step is idempotent and the profile goes last, so a request that fails partway is finished
+// by sending it again. A resource added later that an account owns is erased here too.
 func (s *Service) DeleteUser(w http.ResponseWriter, r *http.Request) {
 	id := uidFromContext(r.Context())
 
@@ -212,7 +191,7 @@ func (s *Service) DeleteUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := s.eraseContent(r.Context(), id); err != nil {
+	if err := s.notes.DeleteOwned(r.Context(), id); err != nil {
 		s.logger().Error("erasing account content failed", "error", err)
 		writeError(w, http.StatusInternalServerError, "internal error")
 		return
@@ -223,37 +202,4 @@ func (s *Service) DeleteUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusNoContent)
-}
-
-// eraseContent removes everything uid created apart from the profile itself.
-func (s *Service) eraseContent(ctx context.Context, uid string) error {
-	slugs, err := s.blogs.Owned(ctx, uid)
-	if err != nil {
-		return err
-	}
-	for _, slug := range slugs {
-		if err := s.chats.Delete(ctx, slug); err != nil {
-			return err
-		}
-		if err := s.blogs.Purge(ctx, slug); err != nil {
-			return err
-		}
-	}
-
-	comments, err := s.comments.ListByAuthor(ctx, uid)
-	if err != nil {
-		return err
-	}
-	for _, comment := range comments {
-		// Other readers' reactions to the comment go with it, as they do when it is deleted alone.
-		target := entity.ReactionTarget{BlogSlug: comment.BlogSlug, CommentID: comment.ID}
-		if err := s.reactions.DeleteTarget(ctx, target); err != nil {
-			return err
-		}
-		if err := s.comments.Delete(ctx, comment.BlogSlug, comment.ID); err != nil {
-			return err
-		}
-	}
-
-	return s.reactions.DeleteByUser(ctx, uid)
 }

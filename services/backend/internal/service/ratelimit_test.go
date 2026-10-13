@@ -1,7 +1,6 @@
 package service
 
 import (
-	"bytes"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -9,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/edgorman/blog.gorman.club/services/backend/internal/entity"
+	"github.com/edgorman/webapp-template/services/backend/internal/entity"
 )
 
 // newTestLimiter builds a limiter on a clock the test moves by hand, so a budget can be exhausted
@@ -24,7 +23,7 @@ func newTestLimiter(limit rateLimit, clock *time.Time) *rateLimiter {
 // burst cannot be handed an extra token by the wall clock advancing mid-loop.
 func freezeLimiters(s *Service) {
 	at := time.Now()
-	for _, limiter := range []*rateLimiter{s.ipLimiter, s.callerLimiter, s.assistantLimiter, s.searchLimiter} {
+	for _, limiter := range []*rateLimiter{s.ipLimiter, s.callerLimiter} {
 		limiter.now = func() time.Time { return at }
 	}
 }
@@ -273,15 +272,13 @@ func TestHandler_LimitsAnonymousRequestsPerIP(t *testing.T) {
 // A preflight is answered above the limiter, so a browser's OPTIONS never spends the budget of the
 // request it precedes.
 func TestHandler_PreflightIsNotRateLimited(t *testing.T) {
-	s := New(Config{AllowedOrigin: testOrigin}, newFakeBlogRepository(), newFakeUserRepository(),
-		newFakeChatRepository(), newFakeCommentRepository(), newFakeReactionRepository(), newFakeEmbeddingRepository(),
-		fakeVerifier{uid: "caller"}, &fakeAssistant{})
+	s := New(Config{AllowedOrigin: testOrigin}, newFakeNoteRepository(), newFakeUserRepository(), fakeVerifier{uid: "caller"})
 	freezeLimiters(s)
 	handler := s.Handler()
 
 	for range requestsPerIP.burst + 10 {
 		rec := httptest.NewRecorder()
-		handler.ServeHTTP(rec, httptest.NewRequest(http.MethodOptions, "/blogs", nil))
+		handler.ServeHTTP(rec, httptest.NewRequest(http.MethodOptions, "/notes", nil))
 		if rec.Result().StatusCode != http.StatusNoContent {
 			t.Fatalf("preflight status = %d, want %d", rec.Result().StatusCode, http.StatusNoContent)
 		}
@@ -315,92 +312,5 @@ func TestHandler_LimitsAuthenticatedRequestsPerCaller(t *testing.T) {
 	if status := request("198.51.100.9"); status != http.StatusTooManyRequests {
 		t.Errorf("status past the burst = %d, want %d (a new address must not reset an account's budget)",
 			status, http.StatusTooManyRequests)
-	}
-}
-
-// The assistant's own budget is far smaller than the per-account one it sits inside, so a chat turn
-// is refused long before an ordinary write would be.
-func TestHandler_LimitsAssistantTurnsPerCaller(t *testing.T) {
-	blogs := newFakeBlogRepository()
-	blogs.seed(entity.Blog{
-		Slug:       chatSlug,
-		OwnerID:    chatOwner,
-		Title:      "Hello",
-		Content:    "the cat sat",
-		Visibility: entity.VisibilityPublic,
-	})
-	// The subscription is what entitles the account to reach the assistant at all, so the budget
-	// under test is the one that stops a caller who is allowed to spend.
-	until := time.Now().UTC().Add(time.Hour)
-	users := newFakeUserRepository()
-	users.seed(entity.User{ID: chatOwner, Username: "calm-smiling-kestrel", SubscribedUntil: &until})
-
-	s := New(
-		Config{AssistantEntitlement: entity.NewAssistantEntitlement(true)},
-		blogs, users, newFakeChatRepository(), newFakeCommentRepository(), newFakeReactionRepository(), newFakeEmbeddingRepository(),
-		fakeVerifier{uid: chatOwner},
-		&fakeAssistant{},
-	)
-	freezeLimiters(s)
-	handler := s.Handler()
-
-	send := func() *httptest.ResponseRecorder {
-		req := httptest.NewRequest(http.MethodPost, "/blogs/"+chatSlug+"/chat",
-			bytes.NewReader([]byte(`{"message":"tighten this"}`)))
-		req.Header.Set(authorizationHeader, bearerPrefix+"token")
-		req.Header.Set(authorizationProviderHeader, string(providerGoogle))
-		rec := httptest.NewRecorder()
-		handler.ServeHTTP(rec, req)
-		return rec
-	}
-
-	if assistantTurnsPerCaller.burst >= requestsPerCaller.burst {
-		t.Fatalf("the assistant budget (%d) must be tighter than the per-account one (%d), or it does nothing",
-			assistantTurnsPerCaller.burst, requestsPerCaller.burst)
-	}
-	for i := range assistantTurnsPerCaller.burst {
-		if status := send().Result().StatusCode; status != http.StatusOK {
-			t.Fatalf("turn %d: status = %d, want %d", i+1, status, http.StatusOK)
-		}
-	}
-
-	rec := send()
-	if rec.Result().StatusCode != http.StatusTooManyRequests {
-		t.Fatalf("status past the burst = %d, want %d", rec.Result().StatusCode, http.StatusTooManyRequests)
-	}
-	decodeAPIError(t, rec)
-}
-
-// A search calls a paid model, so it has a budget of its own, far inside the per-IP one, while the
-// feed without q is not charged against it.
-func TestHandler_LimitsSearchesPerClient(t *testing.T) {
-	s := newTestService(nil, nil)
-	freezeLimiters(s)
-	handler := s.Handler()
-
-	request := func(target, address string) int {
-		req := httptest.NewRequest(http.MethodGet, target, nil)
-		req.RemoteAddr = address + ":1234"
-		rec := httptest.NewRecorder()
-		handler.ServeHTTP(rec, req)
-		return rec.Result().StatusCode
-	}
-
-	if searchesPerClient.burst >= requestsPerIP.burst {
-		t.Fatalf("search burst %d is not inside the per-IP burst %d", searchesPerClient.burst, requestsPerIP.burst)
-	}
-	for i := range searchesPerClient.burst {
-		if status := request("/blogs?q=go", "203.0.113.7"); status != http.StatusOK {
-			t.Fatalf("search %d: status = %d, want %d", i+1, status, http.StatusOK)
-		}
-	}
-	if status := request("/blogs?q=go", "203.0.113.7"); status != http.StatusTooManyRequests {
-		t.Errorf("status past the search burst = %d, want %d", status, http.StatusTooManyRequests)
-	}
-	if status := request("/blogs", "203.0.113.7"); status != http.StatusOK {
-		t.Errorf("feed without q = %d, want %d - it must not spend the search budget", status, http.StatusOK)
-	}
-	if status := request("/blogs?q=go", "198.51.100.9"); status != http.StatusOK {
-		t.Errorf("search from a second address = %d, want %d", status, http.StatusOK)
 	}
 }

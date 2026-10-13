@@ -1,36 +1,39 @@
-// Cloudflare Pages advanced-mode worker (#221): what crawlers and link previews need that a
+// Cloudflare Pages advanced-mode worker: what crawlers and link previews need that a
 // JavaScript-only SPA can't give them. It lives in public/ so Vite copies it into dist/, which makes
 // it part of the commit-SHA bundle frontend-publish stores and prod promotes unchanged. Everything
 // it doesn't handle goes to the static assets untouched, _headers and all.
 //
-// It finds the backend the same way the SPA does, from the config.json frontend-deploy writes next
-// to the bundle, and only ever calls it anonymously, so it sees exactly what a signed-out reader
-// can: a private post is a 404 to it, and its title never reaches the page.
+// It reads the same config.json frontend-deploy writes next to the bundle that the SPA does - the
+// backend URL, the site's name and its canonical (production) URL - and only ever calls the backend
+// anonymously, so it sees exactly what a signed-out reader can: a private note is a 404 to it, and
+// its title never reaches the page.
 //
-// SITE_URL, SITE_NAME and excerpt() mirror src/lib/seo.ts, which this file can't import because it
-// ships as-is rather than through Vite. Change both together.
+// excerpt() mirrors snippetFrom in src/lib/format.ts, which this file can't import because it ships
+// as-is rather than through Vite. Change both together.
 
-const SITE_URL = 'https://blog.gorman.club'
-const SITE_NAME = 'Gorman Club'
-const PROD_HOSTNAME = new URL(SITE_URL).hostname
-// ponytail: stops the sitemap at 50 pages of 100 posts; move to a dedicated backend route if the
-// blog ever outgrows that.
+// ponytail: stops the sitemap at 50 pages of 100 notes; move to a dedicated backend route if the
+// site ever outgrows that.
 const SITEMAP_MAX_PAGES = 50
-// How long the backend gets to answer all its pages before the sitemap falls back (#246).
+// How long the backend gets to answer all its pages before the sitemap falls back.
 const SITEMAP_TIMEOUT_MS = 10_000
 // How long a colo keeps the last good sitemap to fall back to: a week.
 const SITEMAP_LAST_GOOD_SECONDS = 7 * 24 * 60 * 60
-// How long a post page waits for the backend before serving the plain shell: the SPA fetches the
-// post itself anyway, so a slow or cold backend shouldn't hold up the page.
-const POST_TIMEOUT_MS = 1500
-// The SPA's routes that aren't posts or profiles but are worth indexing.
-const STATIC_PAGES = ['/privacy', '/terms']
+// How long a note page waits for the backend before serving the plain shell: the SPA fetches the
+// note itself anyway, so a slow or cold backend shouldn't hold up the page.
+const NOTE_TIMEOUT_MS = 1500
+// The SPA's routes that aren't notes but are worth indexing.
+const STATIC_PAGES = ['/']
 
 export default {
   async fetch(request, env) {
     const url = new URL(request.url)
-    const prod = url.hostname === PROD_HOSTNAME
-    const response = await route(request, env, url, prod)
+    const config = await readConfig(env, url)
+    // siteUrl is production's origin on every deployment, so it is also how this one tells whether
+    // it is production.
+    const prod = !!config.siteUrl && url.hostname === new URL(config.siteUrl).hostname
+    // A deployment with no config.json still answers with absolute URLs, its own.
+    config.siteUrl ||= url.origin
+    const response = await route(request, env, url, config, prod)
     if (prod) return response
     // Staging (or a *.pages.dev preview) serves the same bundle and the same _headers as prod, so
     // this is the one place that can tell it apart and keep it out of search results.
@@ -40,57 +43,56 @@ export default {
   },
 }
 
-async function route(request, env, url, prod) {
+async function route(request, env, url, config, prod) {
   if (url.pathname === '/robots.txt') {
     const body = prod
-      ? `User-agent: *\nAllow: /\nSitemap: ${SITE_URL}/sitemap.xml\n`
+      ? `User-agent: *\nAllow: /\nSitemap: ${config.siteUrl}/sitemap.xml\n`
       : 'User-agent: *\nDisallow: /\n'
     return new Response(body, { headers: { 'Content-Type': 'text/plain; charset=utf-8' } })
   }
-  if (url.pathname === '/sitemap.xml') return sitemap(env, url)
-  const slug = /^\/post\/([^/]+)\/?$/.exec(url.pathname)?.[1]
-  if (slug && slug !== 'new' && request.method === 'GET') return postShell(request, env, url, slug)
+  if (url.pathname === '/sitemap.xml') return sitemap(config, url)
+  const id = /^\/note\/([^/]+)\/?$/.exec(url.pathname)?.[1]
+  if (id && id !== 'new' && request.method === 'GET') return noteShell(request, env, config, id)
   return env.ASSETS.fetch(request)
 }
 
-/** The SPA shell with the post's title, description, Open Graph and canonical tags in its head. */
-async function postShell(request, env, url, encodedSlug) {
-  const [shell, post] = await Promise.all([env.ASSETS.fetch(request), fetchPost(env, url, encodedSlug)])
-  if (!post || shell.status !== 200) return shell
+/** The SPA shell with the note's title, description, Open Graph and canonical tags in its head. */
+async function noteShell(request, env, config, encodedId) {
+  const [shell, note] = await Promise.all([env.ASSETS.fetch(request), fetchNote(config, encodedId)])
+  if (!note || shell.status !== 200) return shell
   const headers = new Headers(shell.headers)
   headers.delete('Content-Length')
   headers.delete('ETag')
-  // A function, not a string: a string replacement would expand $' and $& inside the post's title.
-  const html = (await shell.text()).replace(/<title>[^<]*<\/title>/, () => postTags(post))
+  // A function, not a string: a string replacement would expand $' and $& inside the note's title.
+  const html = (await shell.text()).replace(/<title>[^<]*<\/title>/, () => noteTags(config, note))
   return new Response(html, { status: 200, headers })
 }
 
-/** The post as a signed-out reader sees it, or null for a private, missing or unreachable one. */
-async function fetchPost(env, url, encodedSlug) {
+/** The note as a signed-out reader sees it, or null for a private, missing or unreachable one. */
+async function fetchNote(config, encodedId) {
+  if (!config.backendUrl) return null
   try {
-    const signal = AbortSignal.timeout(POST_TIMEOUT_MS)
-    const backend = await backendUrl(env, url, signal)
-    if (!backend) return null
-    const slug = decodeURIComponent(encodedSlug)
-    const response = await fetch(`${backend}/blogs/${encodeURIComponent(slug)}`, { signal })
+    const id = decodeURIComponent(encodedId)
+    const signal = AbortSignal.timeout(NOTE_TIMEOUT_MS)
+    const response = await fetch(`${config.backendUrl}/notes/${encodeURIComponent(id)}`, { signal })
     if (!response.ok) return null
-    const post = await response.json()
-    return post.visibility === 'public' ? post : null
+    const note = await response.json()
+    return note.visibility === 'public' ? note : null
   } catch {
     return null
   }
 }
 
 /**
- * Always a 200 sitemap (#246): Search Console reports any error, or anything that isn't XML, as
- * "Sitemap could not be read", so a backend that's down, cold or slow falls back to the last good
- * sitemap this colo cached, or failing that to the static pages alone, rather than a 502.
+ * Always a 200 sitemap: Search Console reports any error, or anything that isn't XML, as "Sitemap
+ * could not be read", so a backend that's down, cold or slow falls back to the last good sitemap
+ * this colo cached, or failing that to the static pages alone, rather than a 502.
  */
-async function sitemap(env, url) {
+async function sitemap(config, url) {
   const cache = typeof caches === 'undefined' ? null : caches.default
   const lastGood = new Request(new URL('/sitemap.xml?last-good', url))
   try {
-    const xml = sitemapXml(await sitemapEntries(env, url))
+    const xml = sitemapXml(await sitemapEntries(config))
     const response = xmlResponse(xml, 3600)
     // Kept well past the hour it's served fresh, so there's something to fall back to.
     await cache?.put(lastGood, xmlResponse(xml, SITEMAP_LAST_GOOD_SECONDS)).catch(() => {})
@@ -99,38 +101,37 @@ async function sitemap(env, url) {
     console.error(`Sitemap falling back: ${e instanceof Error ? e.message : e}`)
     const cached = await cache?.match(lastGood).catch(() => undefined)
     if (cached) return xmlResponse(await cached.text(), 300)
-    return xmlResponse(sitemapXml(STATIC_PAGES.map(staticEntry)), 300)
+    return xmlResponse(sitemapXml(STATIC_PAGES.map((path) => staticEntry(config, path))), 300)
   }
 }
 
-/** Every <url> line: the static pages, then each public post. Throws if the backend can't be read. */
-async function sitemapEntries(env, url) {
-  const backend = await backendUrl(env, url)
-  if (!backend) throw new Error('no backend configured')
-  const entries = STATIC_PAGES.map(staticEntry)
+/** Every <url> line: the static pages, then each public note. Throws if the backend can't be read. */
+async function sitemapEntries(config) {
+  if (!config.backendUrl) throw new Error('no backend configured')
+  const entries = STATIC_PAGES.map((path) => staticEntry(config, path))
   // One deadline for all the pages, so a Cloud Run cold start falls back before the crawler gives up.
   const signal = AbortSignal.timeout(SITEMAP_TIMEOUT_MS)
   let startAfter = ''
   for (let i = 0; i < SITEMAP_MAX_PAGES; i++) {
     const query = new URLSearchParams({ limit: '100' })
     if (startAfter) query.set('startAfter', startAfter)
-    const response = await fetch(`${backend}/blogs?${query}`, { signal })
-    if (!response.ok) throw new Error(`GET /blogs answered ${response.status}`)
+    const response = await fetch(`${config.backendUrl}/notes?${query}`, { signal })
+    if (!response.ok) throw new Error(`GET /notes answered ${response.status}`)
     const page = await response.json()
-    const posts = page.posts ?? []
-    for (const post of posts) {
-      if (post.visibility !== 'public') continue
-      const lastmod = post.updatedAt ? `<lastmod>${escapeHtml(post.updatedAt)}</lastmod>` : ''
-      entries.push(`  <url><loc>${escapeHtml(postUrl(post))}</loc>${lastmod}</url>`)
+    const notes = page.notes ?? []
+    for (const note of notes) {
+      if (note.visibility !== 'public') continue
+      const lastmod = note.updatedAt ? `<lastmod>${escapeHtml(note.updatedAt)}</lastmod>` : ''
+      entries.push(`  <url><loc>${escapeHtml(noteUrl(config, note))}</loc>${lastmod}</url>`)
     }
-    if (!page.hasMore || posts.length === 0) break
-    startAfter = posts.at(-1).createdAt
+    if (!page.hasMore || notes.length === 0) break
+    startAfter = notes.at(-1).createdAt
   }
   return entries
 }
 
-function staticEntry(path) {
-  return `  <url><loc>${SITE_URL}${path}</loc></url>`
+function staticEntry(config, path) {
+  return `  <url><loc>${escapeHtml(config.siteUrl + path)}</loc></url>`
 }
 
 function sitemapXml(entries) {
@@ -149,42 +150,44 @@ function xmlResponse(xml, maxAge) {
   })
 }
 
-/** config.json's backendUrl, or '' when this deployment has none. */
-async function backendUrl(env, url, signal) {
+/** config.json's backendUrl, siteUrl and siteName, each '' when this deployment has none. */
+async function readConfig(env, url) {
+  let config = {}
   try {
-    const response = await env.ASSETS.fetch(new URL('/config.json', url), { signal })
-    const config = response.ok ? await response.json() : {}
-    return typeof config.backendUrl === 'string' ? config.backendUrl.replace(/\/$/, '') : ''
+    const response = await env.ASSETS.fetch(new URL('/config.json', url))
+    if (response.ok) config = await response.json()
   } catch {
     // Missing: Pages answers the SPA shell instead, which isn't JSON.
-    return ''
   }
+  const text = (value) => (typeof value === 'string' ? value.replace(/\/$/, '') : '')
+  return { backendUrl: text(config.backendUrl), siteUrl: text(config.siteUrl), siteName: text(config.siteName) }
 }
 
-function postUrl(post) {
-  return `${SITE_URL}/post/${encodeURIComponent(post.slug)}`
+function noteUrl(config, note) {
+  return `${config.siteUrl}/note/${encodeURIComponent(note.id)}`
 }
 
-function postTags(post) {
-  const title = post.title || '(untitled)'
-  const description = excerpt(post.content ?? '')
-  const href = postUrl(post)
+function noteTags(config, note) {
+  const title = note.title || '(untitled)'
+  const description = excerpt(note.body ?? '')
+  const href = noteUrl(config, note)
+  const siteName = escapeHtml(config.siteName)
   const jsonLd = JSON.stringify({
     '@context': 'https://schema.org',
-    '@type': 'BlogPosting',
+    '@type': 'Article',
     headline: title,
     description,
     url: href,
-    ...(post.createdAt ? { datePublished: post.createdAt } : {}),
-    ...(post.updatedAt ? { dateModified: post.updatedAt } : {}),
-    ...(post.authorUsername ? { author: { '@type': 'Person', name: post.authorUsername } } : {}),
+    ...(note.createdAt ? { datePublished: note.createdAt } : {}),
+    ...(note.updatedAt ? { dateModified: note.updatedAt } : {}),
+    ...(note.authorUsername ? { author: { '@type': 'Person', name: note.authorUsername } } : {}),
   }).replace(/</g, '\\u003c')
   return [
-    `<title>${escapeHtml(title)} · ${SITE_NAME}</title>`,
+    `<title>${escapeHtml(title)}${siteName ? ` · ${siteName}` : ''}</title>`,
     `<meta name="description" content="${escapeHtml(description)}" />`,
     `<link rel="canonical" href="${escapeHtml(href)}" />`,
     `<meta property="og:type" content="article" />`,
-    `<meta property="og:site_name" content="${SITE_NAME}" />`,
+    `<meta property="og:site_name" content="${siteName}" />`,
     `<meta property="og:title" content="${escapeHtml(title)}" />`,
     `<meta property="og:description" content="${escapeHtml(description)}" />`,
     `<meta property="og:url" content="${escapeHtml(href)}" />`,
@@ -202,17 +205,8 @@ function escapeHtml(value) {
     .replace(/'/g, '&#39;')
 }
 
-function excerpt(markdown, max = 160) {
-  const text = markdown
-    .replace(/```[\s\S]*?```/g, ' ')
-    .replace(/!\[[^\]]*\]\([^)]*\)/g, ' ')
-    .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
-    .replace(/<[^>]*>/g, ' ')
-    .replace(/^\s{0,3}(#{1,6}|>|[-*+]|\d+\.)\s+/gm, '')
-    .replace(/[*_`~]+/g, '')
-    .replace(/\s+/g, ' ')
-    .trim()
-  if (text.length <= max) return text
-  const cut = text.slice(0, max - 1)
-  return `${cut.slice(0, cut.lastIndexOf(' ') > 0 ? cut.lastIndexOf(' ') : cut.length)}…`
+function excerpt(body, max = 160) {
+  const plain = body.replace(/\s+/g, ' ').trim()
+  if (plain.length <= max) return plain
+  return `${plain.slice(0, max - 1).trimEnd()}…`
 }

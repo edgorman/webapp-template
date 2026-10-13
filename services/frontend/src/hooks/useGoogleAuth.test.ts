@@ -14,16 +14,16 @@ function credential(payload: Record<string, unknown>): string {
 describe('decodeCredential', () => {
   it('reads the identity claims out of the payload', () => {
     const user = decodeCredential(
-      credential({ sub: '1234567890', email: 'ed@example.com', name: 'Ed Gorman' }),
+      credential({ sub: '1234567890', email: 'ada@example.com', name: 'Ada Lovelace' }),
     )
 
-    expect(user).toEqual({ id: '1234567890', email: 'ed@example.com', name: 'Ed Gorman' })
+    expect(user).toEqual({ id: '1234567890', email: 'ada@example.com', name: 'Ada Lovelace' })
   })
 
   it('falls back to the email when the token carries no name', () => {
-    const user = decodeCredential(credential({ sub: '1', email: 'ed@example.com' }))
+    const user = decodeCredential(credential({ sub: '1', email: 'ada@example.com' }))
 
-    expect(user.name).toBe('ed@example.com')
+    expect(user.name).toBe('ada@example.com')
   })
 
   // atob() is Latin-1, so a name outside ASCII is mangled unless the bytes are decoded as UTF-8.
@@ -45,13 +45,13 @@ describe('decodeCredential', () => {
   })
 })
 
-const STORAGE_KEY = 'blog.gorman.club:google-credential'
+const STORAGE_KEY = 'app:google-credential'
 
 /** A credential expiring the given number of seconds from now. */
 function credentialExpiringIn(seconds: number): string {
   return credential({
     sub: '1',
-    email: 'ed@example.com',
+    email: 'ada@example.com',
     name: 'Ed',
     exp: Math.floor(Date.now() / 1000) + seconds,
   })
@@ -115,7 +115,7 @@ describe('useGoogleAuth', () => {
 
     const { result } = renderHook(() => useGoogleAuth())
 
-    expect(result.current.user).toEqual({ id: '1', email: 'ed@example.com', name: 'Ed' })
+    expect(result.current.user).toEqual({ id: '1', email: 'ada@example.com', name: 'Ed' })
     expect(result.current.authHeaders.Authorization).toMatch(/^Bearer /)
     // Already signed in, so One Tap must not be put in front of the user.
     expect(id.prompt).not.toHaveBeenCalled()
@@ -137,7 +137,7 @@ describe('useGoogleAuth', () => {
   // A credential with no exp can't be reasoned about, so it is treated as unusable.
   it('discards a cached credential with no expiry', () => {
     process.env.VITE_GOOGLE_CLIENT_ID = 'test-client-id'
-    sessionStorage.setItem(STORAGE_KEY, credential({ sub: '1', email: 'ed@example.com' }))
+    sessionStorage.setItem(STORAGE_KEY, credential({ sub: '1', email: 'ada@example.com' }))
     stubGoogle()
 
     const { result } = renderHook(() => useGoogleAuth())
@@ -169,7 +169,7 @@ describe('useGoogleAuth', () => {
     act(() => config.callback({ credential: issued }))
 
     expect(sessionStorage.getItem(STORAGE_KEY)).toBe(issued)
-    expect(result.current.user?.email).toBe('ed@example.com')
+    expect(result.current.user?.email).toBe('ada@example.com')
   })
 
   // Sign-out has to clear both halves, or the next load would restore what was just signed out of.

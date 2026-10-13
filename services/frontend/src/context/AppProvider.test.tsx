@@ -41,7 +41,7 @@ function Probe() {
 
 function renderProvider() {
   return render(
-    <AppProvider>
+    <AppProvider config={{ siteUrl: 'https://app.example.com', siteName: 'Example App', backendUrl: 'http://api.test' }}>
       <Probe />
     </AppProvider>,
   )
@@ -64,7 +64,7 @@ describe('AppProvider', () => {
   })
 
   // Signing in is the only "sign-up" the backend sees, so a caller with no profile gets one here
-  // rather than having to visit the editor first - otherwise their posts have no author to show.
+  // rather than having to rename themselves first - otherwise their notes have no author to show.
   it('creates a profile when the caller has none', async () => {
     mockGetCurrentUser.mockRejectedValue(new ApiError(404, 'user not found'))
     mockPutUser.mockResolvedValue(profile)

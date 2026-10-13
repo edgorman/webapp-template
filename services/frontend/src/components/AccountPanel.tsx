@@ -1,7 +1,7 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useApp } from '../context/AppContext'
-import { userPath } from '../lib/api'
+import { errorMessage } from '../lib/api'
 import { releaseUrl } from '../lib/format'
 import { GoogleSignInButton } from './GoogleSignInButton'
 
@@ -12,17 +12,55 @@ const CloseIcon = () => (
   </svg>
 )
 
+/**
+ * Renames the caller. Every account is given a generated username at sign-up (see AppProvider), so
+ * this is the only place one is chosen.
+ */
+function UsernameForm() {
+  const { api, profile, setProfile } = useApp()
+  const [username, setUsername] = useState(profile?.username ?? '')
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  if (!api || !profile) return null
+  const changed = username.trim() !== '' && username.trim() !== profile.username
+
+  return (
+    <form
+      className="field"
+      onSubmit={(e) => {
+        e.preventDefault()
+        setSaving(true)
+        setError(null)
+        api
+          .putUser({ username: username.trim() })
+          .then(setProfile)
+          .catch((err: unknown) => setError(errorMessage(err, 'Failed to save')))
+          .finally(() => setSaving(false))
+      }}
+    >
+      <label htmlFor="gc-username">Username</label>
+      <div style={{ display: 'flex', gap: 'var(--space-2)' }}>
+        <input id="gc-username" className="input" value={username} onChange={(e) => setUsername(e.target.value)} />
+        <button type="submit" className="btn btn-secondary" disabled={!changed || saving}>
+          {saving ? 'Saving…' : 'Save'}
+        </button>
+      </div>
+      {error && <p role="alert">{error}</p>}
+    </form>
+  )
+}
+
 interface Props {
   onClose: () => void
 }
 
-/** The account overlay opened from NavBar's account button: sign in/out, a New post shortcut, and
- * (pinned to the bottom, see .panel-deploy-info) this build's release tag and staging badge. */
+/** The account overlay opened from NavBar's account button: sign in/out, the username, a New note
+ * shortcut, and (pinned to the bottom, see .panel-deploy-info) this build's release tag and
+ * staging badge. */
 export function AccountPanel({ onClose }: Props) {
-  const { user, profile, authError, authReady, renderSignInButton, signOut, version, environment } = useApp()
-  // The profile page and its editor are both addressed by the username, and the editor sits under
-  // the profile it edits - so neither has a path until the profile has loaded.
-  const profileHref = profile ? userPath(profile.username) : null
+  const { user, profile, authError, authReady, renderSignInButton, signOut, config } = useApp()
+  const { version, environment, githubRepo } = config
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -53,46 +91,31 @@ export function AccountPanel({ onClose }: Props) {
                 <div className="text-muted panel-identity-email">{user.email}</div>
               </div>
             </div>
-            <Link to="/post/new" className="btn btn-primary btn-block" onClick={onClose}>
-              New post
+            {/* Keyed by the username, so the field resets to whatever the profile now holds. */}
+            <UsernameForm key={profile?.username} />
+            <Link to="/note/new" className="btn btn-primary btn-block" onClick={onClose}>
+              New note
             </Link>
-            {profileHref && (
-              <>
-                <Link to={profileHref} className="btn btn-secondary btn-block" onClick={onClose}>
-                  View profile
-                </Link>
-                <Link to={`${profileHref}/edit`} className="btn btn-secondary btn-block" onClick={onClose}>
-                  Edit profile
-                </Link>
-              </>
-            )}
             <button type="button" className="btn btn-ghost btn-block" onClick={() => { signOut(); onClose() }}>
               Sign out
             </button>
           </>
         ) : (
           <>
-            <p className="text-muted">Sign in to publish and manage your posts.</p>
+            <p className="text-muted">Sign in to write and manage your notes.</p>
             {authError ? <p role="alert">{authError}</p> : <GoogleSignInButton ready={authReady} onRender={renderSignInButton} />}
-            {/* Signing in is what creates the account (AppProvider's first PUT /users/me), so this
-                is where the terms are agreed to (#239). */}
-            <p className="text-muted panel-terms">
-              By creating an account you agree to the{' '}
-              <Link to="/terms" onClick={onClose}>Terms</Link> and{' '}
-              <Link to="/privacy" onClick={onClose}>Privacy Policy</Link>.
-            </p>
           </>
         )}
 
         {(version || environment === 'staging') && (
           <div className="panel-deploy-info">
             {/* Only staging says so - a production reader has no reason to be told they're on
-                production (see issue #152). */}
+                production. */}
             {environment === 'staging' && <span className="tag tag-outline">staging</span>}
-            {version && (
+            {version && githubRepo && (
               <a
                 className="panel-version text-muted"
-                href={releaseUrl(version)}
+                href={releaseUrl(githubRepo, version)}
                 target="_blank"
                 rel="noopener noreferrer"
               >
