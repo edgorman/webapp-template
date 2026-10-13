@@ -1,0 +1,67 @@
+package repository
+
+import (
+	"context"
+	"time"
+
+	"github.com/edgorman/blog.gorman.club/services/backend/internal/entity"
+)
+
+// ListParams bounds one page of BlogRepository.List.
+type ListParams struct {
+	// Limit caps how many posts a page holds. A repository is free to treat a non-positive or
+	// out-of-range value as its own default rather than erroring, since this is a page size, not a
+	// caller-facing validation.
+	Limit int
+	// StartAfter, when non-zero, excludes every post at or after this createdAt - continuing a feed
+	// a caller has already seen a page of, rather than restarting it. A caller sets it to the
+	// createdAt of the last post its previous page held.
+	StartAfter time.Time
+	// OwnerUID, when set, narrows the page to one author's posts - what a profile feed asks for
+	// instead of the general feed's "everything uid may read". It is an id, not a username: a
+	// caller that only holds a username resolves it first, the same way any other owner-facing
+	// lookup does.
+	OwnerUID string
+	// Tag, when set, narrows the page to posts filed under it (entity.Blog.HasTag). It is expected
+	// already normalized (entity.NormalizeTag), since that is the only form a post stores.
+	Tag string
+	// Query, when set, narrows the page to posts whose title or body holds it, ignoring case
+	// (entity.Blog.MatchesQuery). It is a substring test rather than a search index, so a
+	// repository is free to apply it as it walks rather than as a datastore filter. The search
+	// decorator (internal/repository/search) answers it by meaning instead, falling back to this.
+	Query string
+}
+
+// BlogRepository persists blogs. A post is identified by its slug alone - slugs are unique across
+// every author, not merely within one - so a lookup names nothing else. Updates are conditional on
+// the post being unchanged since it was read, and Get is unfiltered: callers check read access
+// themselves via entity.Blog.CanBeReadBy.
+type BlogRepository interface {
+	// Get returns ErrNotFound if no undeleted post holds slug.
+	Get(ctx context.Context, slug string) (entity.Blog, error)
+	// List returns one page of the undeleted blogs uid may read, newest first, applying the same
+	// predicate as entity.Blog.CanBeReadBy plus whatever params narrows to, and reports whether a
+	// further page follows.
+	List(ctx context.Context, uid string, params ListParams) (blogs []entity.Blog, hasMore bool, err error)
+	// Create writes a new blog at the slug its caller chose, stamping the creation/update
+	// timestamps. It rejects a blog that fails entity.Blog.Validate without writing anything, and
+	// returns ErrSlugTaken - again without writing - if any post already holds that slug, so the
+	// caller can try another (see entity.NewBlogSlug).
+	Create(ctx context.Context, blog entity.Blog) (entity.Blog, error)
+	// Update overwrites the post at blog.Slug and refreshes UpdatedAt, carrying CreatedAt over from
+	// blog rather than re-reading it. It rejects a blog that fails entity.Blog.Validate without
+	// writing anything. blog.UpdatedAt must be the value Get returned: the write is refused with
+	// ErrPostChanged if the stored post has been written since, and with ErrNotFound if it has been
+	// deleted or erased, so a caller holding an old copy - an assistant turn waiting on the model -
+	// cannot write back an audience, a body or a post that is no longer there.
+	Update(ctx context.Context, blog entity.Blog) (entity.Blog, error)
+	// Delete soft-deletes the post at slug by stamping entity.Blog.DeletedAt - the document itself
+	// is never removed from Firestore. It returns ErrNotFound if no undeleted post holds slug.
+	Delete(ctx context.Context, slug string) error
+	// Owned lists the slug of every post ownerID holds, soft-deleted ones included, whoever may
+	// read them. It is for erasing an account, which must find everything the account wrote.
+	Owned(ctx context.Context, ownerID string) ([]string, error)
+	// Purge erases the post at slug outright, with the comments and reactions stored beneath it.
+	// Unlike Delete it leaves nothing behind, and erasing a post that is already gone succeeds.
+	Purge(ctx context.Context, slug string) error
+}

@@ -1,0 +1,202 @@
+import { useEffect, useRef, useState } from 'react'
+import { Link, useParams } from 'react-router-dom'
+import { FeedList } from '../components/FeedList'
+import { PageMeta } from '../components/PageMeta'
+import { useApp } from '../context/AppContext'
+import { ApiError, errorMessage, userPath, type Blog } from '../lib/api'
+import { formatDate } from '../lib/format'
+
+interface ProfileInfo {
+  /** Taken from the fetched profile rather than the URL, so it carries the casing as stored. */
+  username: string
+  bio: string
+  /**
+   * Optional because the wire says so: `createdAt` is a `google.protobuf.Timestamp`, and protojson
+   * may leave a message field out of the body, so the generated `User` types it as possibly
+   * absent. The render below already guards on it.
+   */
+  memberSince?: string
+}
+
+type PostsState =
+  | { phase: 'unconfigured' }
+  | { phase: 'loading' }
+  | { phase: 'error'; message: string }
+  | { phase: 'ready'; posts: Blog[]; hasMore: boolean; loadingMore: boolean; loadMoreError?: string }
+
+const FEED_SIZE = 10
+
+/** A single author's recent posts, with as much of their profile as the caller is allowed to see. */
+export function UserProfile() {
+  const { username } = useParams<{ username: string }>()
+  const { api } = useApp()
+  const [profile, setProfile] = useState<ProfileInfo | null>(null)
+  const [missing, setMissing] = useState(false)
+  // Any other failure to look the profile up, which is worth retrying rather than calling the
+  // name unclaimed. `attempt` is bumped by the retry to re-run the lookup.
+  const [lookupError, setLookupError] = useState<string | null>(null)
+  const [attempt, setAttempt] = useState(0)
+  const [postsState, setPostsState] = useState<PostsState>(
+    api ? { phase: 'loading' } : { phase: 'unconfigured' },
+  )
+
+  useEffect(() => {
+    if (!api || !username) return
+    // Cleared per username: the router reuses this component between profiles, so without it a
+    // second profile would render the first one's header, or its posts, while the new one loads.
+    setProfile(null)
+    setMissing(false)
+    setLookupError(null)
+    setPostsState({ phase: 'loading' })
+
+    let cancelled = false
+    // An author who never set up a profile has no username, so nothing can address this page for
+    // them - a lookup that misses means the name really is unclaimed.
+    api.getUser(username).then(
+      (u) => {
+        if (!cancelled) setProfile({ username: u.username, bio: u.bio, memberSince: u.createdAt })
+      },
+      (e: unknown) => {
+        if (cancelled) return
+        if (e instanceof ApiError && e.status === 404) setMissing(true)
+        else setLookupError(errorMessage(e, 'Failed to load this profile'))
+      },
+    )
+    return () => {
+      cancelled = true
+    }
+  }, [api, username, attempt])
+
+  // Bumped whenever the profile changes, so a later page of the profile the reader has since left is
+  // dropped rather than appended to this one.
+  const feed = useRef(0)
+
+  useEffect(() => {
+    // Posts are fetched by the profile's username, once it resolves, rather than filtered
+    // client-side out of the whole feed - the point of scoping `listBlogs` by `author`.
+    if (!api || !profile) return
+    feed.current++
+    setPostsState({ phase: 'loading' })
+
+    let cancelled = false
+    api
+      .listBlogs({ author: profile.username, limit: FEED_SIZE })
+      .then((page) => {
+        if (!cancelled) {
+          setPostsState({ phase: 'ready', posts: page.posts, hasMore: page.hasMore, loadingMore: false })
+        }
+      })
+      .catch((e: unknown) => {
+        if (!cancelled) setPostsState({ phase: 'error', message: errorMessage(e, 'Failed to load posts') })
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [api, profile])
+
+  const loadMore = () => {
+    if (!api || !profile || postsState.phase !== 'ready' || postsState.loadingMore) return
+    const cursor = postsState.posts.at(-1)?.createdAt
+    const id = feed.current
+    setPostsState({ ...postsState, loadingMore: true, loadMoreError: undefined })
+
+    api
+      .listBlogs({ author: profile.username, limit: FEED_SIZE, startAfter: cursor })
+      .then((page) => {
+        if (feed.current !== id) return
+        setPostsState((prev) =>
+          prev.phase === 'ready'
+            ? { phase: 'ready', posts: [...prev.posts, ...page.posts], hasMore: page.hasMore, loadingMore: false }
+            : prev,
+        )
+      })
+      .catch((e: unknown) => {
+        if (feed.current !== id) return
+        setPostsState((prev) =>
+          prev.phase === 'ready'
+            ? { ...prev, loadingMore: false, loadMoreError: errorMessage(e, 'Failed to load more posts') }
+            : prev,
+        )
+      })
+  }
+
+  if (postsState.phase === 'unconfigured') {
+    return (
+      <div className="page">
+        <p className="text-muted center-note">No backend deployed yet - no backend URL is configured.</p>
+      </div>
+    )
+  }
+
+  if (missing) {
+    return (
+      <div className="page">
+        <p className="center-note">No such user.</p>
+        <Link to="/">← Back to feed</Link>
+      </div>
+    )
+  }
+
+  if (lookupError) {
+    return (
+      <div className="page">
+        <p role="alert" className="center-note">
+          {lookupError}
+        </p>
+        <button type="button" className="btn btn-ghost" onClick={() => setAttempt((n) => n + 1)}>
+          Try again
+        </button>
+      </div>
+    )
+  }
+
+  return (
+    <div className="page">
+      {profile && <PageMeta title={profile.username} description={profile.bio || undefined} path={userPath(profile.username) ?? '/'} />}
+      <header className="profile-header">
+        <div className="profile-identity">
+          <div className="profile-avatar">{(profile?.username ?? '?').charAt(0).toUpperCase()}</div>
+          <div>
+            <h1 className="title-profile">{profile?.username ?? 'Loading…'}</h1>
+            {profile?.memberSince && (
+              <span className="text-muted feed-row-date">
+                Member since {formatDate(profile.memberSince)}
+              </span>
+            )}
+          </div>
+        </div>
+        {profile?.bio && <p className="profile-bio text-muted">{profile.bio}</p>}
+      </header>
+
+      {postsState.phase === 'loading' && <p className="text-muted center-note">Loading…</p>}
+      {postsState.phase === 'error' && (
+        <p role="alert" className="center-note">
+          {postsState.message}
+        </p>
+      )}
+      {postsState.phase === 'ready' && postsState.posts.length === 0 && (
+        <p className="text-muted center-note">No posts yet.</p>
+      )}
+      {postsState.phase === 'ready' && postsState.posts.length > 0 && (
+        <>
+          <FeedList posts={postsState.posts} />
+          {(postsState.hasMore || postsState.loadMoreError) && (
+            <div className="feed-load-more">
+              {postsState.loadMoreError && <p role="alert">{postsState.loadMoreError}</p>}
+              {postsState.hasMore && (
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  onClick={loadMore}
+                  disabled={postsState.loadingMore}
+                >
+                  {postsState.loadingMore ? 'Loading…' : 'Load more'}
+                </button>
+              )}
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  )
+}

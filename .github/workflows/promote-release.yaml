@@ -1,0 +1,145 @@
+name: 'Promote Release'
+
+# Fires when a pre-release is promoted to a Release, or an older one is re-promoted to roll back.
+on:
+  release:
+    types: [released]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: promote-release-main
+  cancel-in-progress: false
+
+jobs:
+  # Step 1: infra applies before any service is touched, unconditionally - applies are idempotent.
+  infrastructure-prod:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.sha }}
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        with:
+          workload_identity_provider: ${{ vars.WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.SERVICE_ACCOUNT }}
+      - uses: ./.github/actions/terraform-push-commit
+        with:
+          terraform_directory: 'infrastructure/env'
+          config_directory: 'infrastructure/config/prod'
+          # One client ID, defined in infrastructure/root, serves every environment.
+          secrets: |
+            TF_VAR_google_client_id=${{ vars.GOOGLE_CLIENT_ID }}
+
+  # Step 2: deploy the commit-SHA-tagged image already sitting in prod's own registry, pushed there
+  # when this commit was built and deployed to staging (see Staging Deployments in `.github/AGENTS.md`).
+  # Promotion is nothing but a deploy - it reads nothing from the staging project.
+  services-backend:
+    needs: infrastructure-prod
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    outputs:
+      backend_url: ${{ steps.deploy.outputs.backend_url }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.sha }}
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        with:
+          workload_identity_provider: ${{ vars.WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.SERVICE_ACCOUNT }}
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
+      # Retention only: the release-<version> tag is what the registry's keep-releases cleanup policy
+      # (infrastructure/env/artifact_registry.tf) matches, so a release's image outlives the
+      # most-recent-N window for rollback. The deploy below still goes by commit SHA.
+      - name: Tag the image with its release
+        env:
+          IMAGE: 'europe-west1-docker.pkg.dev/blog-gorman-club-prod/backend/backend'
+          RELEASE: ${{ github.event.release.tag_name }}
+        run: gcloud artifacts docker tags add "$IMAGE:$GITHUB_SHA" "$IMAGE:release-$RELEASE" --quiet
+      - id: deploy
+        uses: ./.github/actions/backend-cloudrun-deploy
+        with:
+          gcp_project_id: 'blog-gorman-club-prod'
+          gcp_region: 'europe-west1'
+          service_name: 'backend-prod'
+          image: 'europe-west1-docker.pkg.dev/blog-gorman-club-prod/backend/backend:${{ github.sha }}'
+
+  # Step 2, alongside the backend: the worker's commit-SHA image, already in prod's registry the same way.
+  services-worker:
+    needs: infrastructure-prod
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.sha }}
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        with:
+          workload_identity_provider: ${{ vars.WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.SERVICE_ACCOUNT }}
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
+      # Retention only: the release-<version> tag is what the registry's keep-releases cleanup policy
+      # (infrastructure/env/artifact_registry.tf) matches, so a release's image outlives the
+      # most-recent-N window for rollback. The deploy below still goes by commit SHA.
+      - name: Tag the image with its release
+        env:
+          IMAGE: 'europe-west1-docker.pkg.dev/blog-gorman-club-prod/backend/worker'
+          RELEASE: ${{ github.event.release.tag_name }}
+        run: gcloud artifacts docker tags add "$IMAGE:$GITHUB_SHA" "$IMAGE:release-$RELEASE" --quiet
+      - uses: ./.github/actions/backend-cloudrun-deploy
+        with:
+          gcp_project_id: 'blog-gorman-club-prod'
+          gcp_region: 'europe-west1'
+          service_name: 'worker-prod'
+          image: 'europe-west1-docker.pkg.dev/blog-gorman-club-prod/backend/worker:${{ github.sha }}'
+
+  # Step 3: fetch the commit-SHA folder already published to prod's own bucket when this commit was
+  # built and validated on staging (a rollback fetches an earlier release's, already sitting there
+  # too), then deploy those static files with config.json written from the just-promoted backend
+  # URL. No cross-project read and no copy - the bucket promotion reads from is prod's own.
+  services-frontend:
+    needs: [infrastructure-prod, services-backend]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.sha }}
+      - id: secrets
+        uses: ./.github/actions/gcp-secret-manager
+        with:
+          project_id: 'blog-gorman-club-root'
+          workload_identity_provider: ${{ vars.WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.SERVICE_ACCOUNT }}
+          secrets_list: |
+            CLOUDFLARE_API_TOKEN=cloudflare_api_token
+            CLOUDFLARE_ACCOUNT_ID=cloudflare_account_id
+      - uses: ./.github/actions/frontend-fetch
+        with:
+          gcp_project_id: 'blog-gorman-club-prod'
+          sha: ${{ github.sha }}
+          workload_identity_provider: ${{ vars.WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.SERVICE_ACCOUNT }}
+      - uses: ./.github/actions/frontend-deploy
+        with:
+          secrets: ${{ steps.secrets.outputs.secrets }}
+          cloudflare_project_name: 'frontend-prod'
+          backend_url: ${{ needs.services-backend.outputs.backend_url }}
+          version: ${{ github.event.release.tag_name }}
+          environment: 'production'

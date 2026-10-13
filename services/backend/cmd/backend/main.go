@@ -1,0 +1,176 @@
+// Command backend serves the blog.gorman.club API.
+//
+// It resolves configuration from the environment, builds the concrete adapters the service
+// depends on (Firestore repositories, a Google token verifier), and hands them to the service
+// package, which owns the routes and business logic.
+package main
+
+import (
+	"context"
+	"fmt"
+	"log/slog"
+	"net/http"
+	"os"
+	"strconv"
+	"time"
+
+	fs "cloud.google.com/go/firestore"
+
+	"github.com/edgorman/blog.gorman.club/services/backend/internal/entity"
+	"github.com/edgorman/blog.gorman.club/services/backend/internal/logging"
+	"github.com/edgorman/blog.gorman.club/services/backend/internal/repository"
+	"github.com/edgorman/blog.gorman.club/services/backend/internal/repository/cache"
+	"github.com/edgorman/blog.gorman.club/services/backend/internal/repository/devauth"
+	"github.com/edgorman/blog.gorman.club/services/backend/internal/repository/firestore"
+	"github.com/edgorman/blog.gorman.club/services/backend/internal/repository/gemini"
+	"github.com/edgorman/blog.gorman.club/services/backend/internal/repository/google"
+	"github.com/edgorman/blog.gorman.club/services/backend/internal/repository/search"
+	"github.com/edgorman/blog.gorman.club/services/backend/internal/service"
+)
+
+// Baked in at build time via -ldflags (see Dockerfile); images are never rebuilt for production.
+var commit = "unknown"
+
+func main() {
+	// Set before anything can log, so every line the process writes - including any a dependency
+	// sends through the standard log package, which slog.SetDefault redirects - reaches Cloud
+	// Logging as structured JSON with a severity (see internal/logging).
+	slog.SetDefault(slog.New(logging.NewHandler(os.Stdout)))
+
+	// run() owns the deferred cleanup; exiting from inside it would skip that via os.Exit.
+	if err := run(); err != nil {
+		slog.Error("backend stopped", "error", err)
+		os.Exit(1)
+	}
+}
+
+func run() error {
+	environment := envOr("ENVIRONMENT", "development")
+	port := envOr("PORT", "8080")
+
+	verifier, err := tokenVerifier(environment, os.Getenv("DEV_AUTH") == "true", os.Getenv("GOOGLE_CLIENT_ID"))
+	if err != nil {
+		return err
+	}
+
+	ctx := context.Background()
+
+	client, err := fs.NewClient(ctx, fs.DetectProjectID)
+	if err != nil {
+		return fmt.Errorf("firestore client: %w", err)
+	}
+	defer client.Close()
+
+	// The model is reached with the runtime service account's own credentials, so there is no key
+	// to configure here - only which model, in which project, and where. GCP_PROJECT_ID is passed
+	// explicitly rather than detected, because the deployment already knows it (see
+	// infrastructure/env/cloud_run.tf) and a metadata lookup would only be a way of being told
+	// something Terraform could have said.
+	assistant := gemini.NewAssistant(gemini.Config{
+		Model:     os.Getenv("ASSISTANT_MODEL"),
+		ProjectID: os.Getenv("GCP_PROJECT_ID"),
+		Location:  envOr("ASSISTANT_LOCATION", "global"),
+	})
+
+	// A deployment with no model entitles nobody, whatever an account has paid for: the capability
+	// /users/me reports is then accurate, and a client never offers an assistant that could only
+	// answer 503. Whether a model is configured is the whole of what this passes in - who is
+	// entitled is each account's own subscription, which lives in Firestore rather than here.
+	if !assistant.Configured() {
+		slog.Warn("ASSISTANT_MODEL or GCP_PROJECT_ID is unset, so the writing assistant is disabled")
+	}
+	entitlement := entity.NewAssistantEntitlement(assistant.Configured())
+
+	// The blog repository is wrapped in a cache before it reaches the service, which is the whole
+	// of how caching is enabled: the decorator implements the same interface, so nothing above here
+	// knows it is there, and removing it is deleting this line. It caches only the anonymous
+	// listing - the highest-traffic, most repeated read in the service, and the one read whose
+	// answer is identical for every caller (see internal/repository/cache).
+	//
+	// Beneath the cache, a search (`q`) is answered by meaning when there is an embedding model to
+	// embed the query with - the same model and vector size the worker embeds posts with - and by
+	// the datastore's substring scan otherwise. The cache sits in front of both, so a repeated
+	// anonymous search costs no model call.
+	var blogs repository.BlogRepository = firestore.NewBlogRepository(client)
+	dimension, _ := strconv.Atoi(os.Getenv("EMBEDDING_DIMENSION"))
+	embedder := gemini.NewEmbedder(gemini.EmbedderConfig{
+		Config: gemini.Config{
+			Model:     os.Getenv("EMBEDDING_MODEL"),
+			ProjectID: os.Getenv("GCP_PROJECT_ID"),
+			Location:  os.Getenv("EMBEDDING_LOCATION"),
+		},
+		Dimension: dimension,
+	})
+	embeddings := firestore.NewEmbeddingRepository(client)
+	if embedder.Configured() {
+		blogs = search.NewBlogRepository(blogs, embeddings, embedder, slog.Default())
+	} else {
+		slog.Warn("EMBEDDING_MODEL, EMBEDDING_DIMENSION or GCP_PROJECT_ID is unset, so search is a substring scan")
+	}
+	blogs = cache.NewBlogRepository(blogs)
+
+	api := service.New(
+		service.Config{
+			Environment:          environment,
+			Commit:               commit,
+			AllowedOrigin:        os.Getenv("CORS_ALLOWED_ORIGIN"),
+			AssistantEntitlement: entitlement,
+		},
+		blogs,
+		firestore.NewUserRepository(client),
+		firestore.NewChatRepository(client),
+		firestore.NewCommentRepository(client),
+		firestore.NewReactionRepository(client),
+		embeddings,
+		verifier,
+		assistant,
+	)
+
+	// The server is built explicitly rather than handed to http.ListenAndServe, which supplies a
+	// zero-value http.Server: one with no timeouts of any kind. A connection that opens and then
+	// sends nothing, or dribbles a request a byte at a time, would hold a goroutine and a file
+	// descriptor until the peer gave up - which costs the sender nothing and is the cheapest denial
+	// of service there is. Cloud Run bounds the request it forwards but not the connection beneath
+	// it, so the bound has to be here.
+	//
+	// WriteTimeout is the loose one, deliberately: it spans the whole response, and an assistant
+	// turn legitimately runs to gemini.replyTimeout (two minutes) before it has anything to write.
+	// Setting it below that would cut off precisely the requests that took the longest to earn an
+	// answer, so it sits above replyTimeout with room, and still well inside Cloud Run's own limit.
+	server := &http.Server{
+		Addr:              ":" + port,
+		Handler:           api.Handler(),
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      3 * time.Minute,
+		IdleTimeout:       2 * time.Minute,
+	}
+
+	slog.Info("backend listening", "port", port, "environment", environment, "commit", commit)
+	return server.ListenAndServe()
+}
+
+// tokenVerifier picks how ID tokens are checked. DEV_AUTH swaps Google sign-in for fixed development
+// tokens (see internal/repository/devauth), which would let anybody sign in as anybody, so it is
+// refused outside ENVIRONMENT=local rather than trusted to be left unset everywhere else.
+func tokenVerifier(environment string, devAuth bool, googleClientID string) (repository.TokenVerifier, error) {
+	if devAuth {
+		if environment != "local" {
+			return nil, fmt.Errorf("DEV_AUTH is only allowed with ENVIRONMENT=local, not %q", environment)
+		}
+		slog.Warn("DEV_AUTH is set, so the development token signs anybody in", "token", devauth.Token)
+		return devauth.TokenVerifier{}, nil
+	}
+	// The OAuth 2.0 client ID ID tokens must be minted for; unset means no request can authenticate.
+	if googleClientID == "" {
+		slog.Warn("GOOGLE_CLIENT_ID is unset, so no request can authenticate")
+	}
+	return google.NewTokenVerifier(googleClientID), nil
+}
+
+func envOr(key, fallback string) string {
+	if value := os.Getenv(key); value != "" {
+		return value
+	}
+	return fallback
+}

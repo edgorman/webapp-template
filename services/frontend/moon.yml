@@ -1,0 +1,52 @@
+$schema: '../../.moon/cache/schemas/project.json'
+language: 'typescript'
+layer: 'application'
+stack: 'frontend'
+tags: ['typescript']
+# Full source path, not 'protos' - the workspace uses globFormat: 'source-path' (see #191).
+dependsOn: ['packages/protos']
+
+# .moon/toolchains.yml never enables the typescript toolchain workspace-wide (its sync rewrites
+# tsconfig project references, and these tsconfigs are hand-maintained) - restated here so this
+# project stays safe even if that ever changes elsewhere in the workspace.
+toolchains:
+  typescript: false
+# moon's own dependency install is disabled workspace-wide (.moon/toolchains.yml's `javascript`
+# entry, the only place that setting is read), so `install` below is the one `npm ci` every task
+# depends on.
+
+fileGroups:
+  sources: ['src/**/*', 'public/**/*', 'e2e/**/*', 'index.html', 'vite.config.ts', 'playwright.config.ts']
+  configs: ['package.json', 'package-lock.json', 'tsconfig*.json', '.oxlintrc.json']
+
+tasks:
+  install:
+    command: 'npm ci'
+    inputs: ['package.json', 'package-lock.json']
+    options:
+      internal: true
+  lint:
+    command: 'npm run lint'
+    deps: ['install']
+    inputs: ['@group(sources)', '@group(configs)']
+  typecheck:
+    command: 'npx tsc -b'
+    deps: ['install']
+    inputs: ['@group(sources)', '@group(configs)']
+  test:
+    command: 'npm test'
+    deps: ['install']
+    # An external project input, not a dependsOn/-g relation: v2 --affected doesn't follow graph
+    # relations by default, and a .proto-only edit must still mark this task affected (#155).
+    inputs: ['@group(sources)', '@group(configs)', 'project://packages/protos']
+  build:
+    command: 'npm run build'
+    deps: ['install']
+    inputs: ['@group(sources)', '@group(configs)']
+    # The whole folder, not a glob - moon deletes files under `outputs` that don't match on
+    # cache hydration, and narrowing this would make a hydrated build lose files vite wrote.
+    outputs: ['dist']
+  dev:
+    command: 'npm run dev'
+    deps: ['install']
+    preset: 'server'

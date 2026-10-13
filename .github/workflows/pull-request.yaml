@@ -1,0 +1,199 @@
+name: 'Pull Request'
+
+on:
+  pull_request:
+    branches:
+      - main
+  # Runs the same required checks on a merge queue's merge commits. Inert while the repository is
+  # user-owned (GitHub only offers merge queues to organization-owned repositories, see
+  # .github/settings.yml), but ready the day one is turned on.
+  merge_group:
+
+permissions:
+  contents: read
+
+concurrency:
+  # A merge_group event has no PR number; its ref (gh-readonly-queue/main/pr-N-<sha>) is unique
+  # per queue entry, so entries don't cancel each other.
+  group: pull-request-root-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # moon decides which Terraform deployment(s) a diff reaches via `moon query affected`. There is
+  # no blanket .github/** glob here because none is needed: every deploy-{root,staging,prod}:plan
+  # task's own `inputs` (#195/#206) already lists the exact composite actions and workflow files
+  # that environment's job depends on, so nothing is left for a repo-wide fallback to paper over.
+  changed:
+    runs-on: ubuntu-latest
+    outputs:
+      infrastructure-root: ${{ steps.moon.outputs.root }}
+      infrastructure-staging: ${{ steps.moon.outputs.staging }}
+      infrastructure-prod: ${{ steps.moon.outputs.prod }}
+    steps:
+      # moon needs full history to resolve the merge base - a shallow clone makes affected
+      # detection "inaccurate or fail entirely" (https://moonrepo.dev/docs/guides/ci).
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          filter: 'blob:none'
+      - uses: moonrepo/setup-toolchain@261c62cb5b0f580c7be7c8cd0f023a2e96756095 # v0.6.4
+        with:
+          auto-install: true
+          # #212's own first three CI runs each failed a different moon task with the identical
+          # `proto-shim: ... Permission denied (os error 13)` error, every time right after a
+          # toolchain cache hit - the cache restore losing proto's shim executable bit, not the
+          # task. Disabled until that's confirmed fixed upstream.
+          cache: false
+      - id: moon
+        name: Compute moon-affected deployments
+        shell: bash
+        env:
+          # `moon query affected` has no --base flag, but reads MOON_BASE the same way `moon ci`
+          # does (crates/app/src/queries/changed_files.rs) - set explicitly, matching the other jobs.
+          # On merge_group it is still right: checkout's fetch-depth 0 fetches origin/main, and the
+          # queue commit diffs against it as this PR plus any entries queued ahead of it - a
+          # superset, so an infrastructure/-only PR still plans every environment it reaches.
+          MOON_BASE: origin/main
+        run: |
+          # Left at the command's own defaults (no --upstream/--downstream): #206 deliberately
+          # modelled deploy-staging/deploy-prod's dependsOn on infra-env/deploy-root as
+          # apply-ordering only, not an affectedness edge, so pulling in graph relations would mark
+          # them affected via the wrong mechanism - the explicit project://infra-root /
+          # project://infra-env inputs are the intended signal.
+          moon query affected > affected.json
+          for env in root staging prod; do
+            # .tasks is omitted entirely when nothing is affected (moon's Affected struct skips
+            # empty maps on serialize), so `(.tasks // {})` guards against `has` erroring on null.
+            val=$(jq -r --arg t "deploy-$env:plan" '(.tasks // {}) | has($t)' affected.json)
+            echo "$env=$val" >> "$GITHUB_OUTPUT"
+          done
+
+  # The three required moon checks, one leg each, so each keeps its own check name. `:taskId` (no
+  # project prefix) is moon's "run in every project that has this task" scope
+  # (https://moonrepo.dev/docs/concepts/target); a project without a given task is silently skipped.
+  # - lint-check: every lint/format/build task. `:format`/`:validate` reach infra-root/infra-env's
+  #   inherited `terraform fmt -check` and `terraform validate` (.moon/tasks/terraform.yml);
+  #   `:validate` is `runInCI: 'only'`, so this is the one place it runs at all.
+  # - test: every project's tests (a shared package still reaches its dependents via each test
+  #   task's own `inputs`, e.g. `project://packages/protos`, #155) plus both images, so a broken
+  #   image build fails the PR rather than the job that publishes it.
+  # - protos-drift: packages/protos:drift (#194), `buf generate` re-run and diffed.
+  moon:
+    name: ${{ matrix.check }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - check: lint-check
+            targets: ':format :lint :vet :typecheck :build :validate root:wire-types root:projects-covered root:go-version-sync'
+          - check: test
+            targets: ':test services/backend:image worker:image'
+          - check: protos-drift
+            targets: 'packages/protos:drift'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          filter: 'blob:none'
+      - uses: moonrepo/setup-toolchain@261c62cb5b0f580c7be7c8cd0f023a2e96756095 # v0.6.4
+        with:
+          auto-install: true
+          cache: false # see `changed`'s identical setup step above for why
+      # internal/repository/firestore's emulator tests skip unless FIRESTORE_EMULATOR_HOST is set.
+      # The jar is the one `gcloud emulators firestore` runs, fetched directly (checksum from
+      # firebase-tools' downloadableEmulatorInfo.json) rather than through a gcloud component
+      # install; it needs Java 21, which the runner image ships beside its default.
+      - name: Start the Firestore emulator
+        if: matrix.check == 'test'
+        shell: bash
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/firestore-emulator.jar" \
+            https://storage.googleapis.com/firebase-preview-drop/emulator/cloud-firestore-emulator-v1.22.0.jar
+          echo "9b6498b7f62714d67f48f59b3818883cd682dbcd46b9f59511de81c97bb5166c  $RUNNER_TEMP/firestore-emulator.jar" | sha256sum -c -
+          nohup "$JAVA_HOME_21_X64/bin/java" -jar "$RUNNER_TEMP/firestore-emulator.jar" --host=127.0.0.1 --port=8081 > "$RUNNER_TEMP/firestore-emulator.log" 2>&1 &
+          timeout 60 bash -c 'until curl -sf http://127.0.0.1:8081 > /dev/null; do sleep 1; done'
+          echo 'FIRESTORE_EMULATOR_HOST=127.0.0.1:8081' >> "$GITHUB_ENV"
+      - name: moon ci
+        shell: bash
+        run: moon ci ${{ matrix.targets }}
+        env:
+          MOON_BASE: origin/main
+
+  infrastructure-root:
+    needs: changed
+    if: needs.changed.outputs.infrastructure-root == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - id: secrets
+        uses: ./.github/actions/gcp-secret-manager
+        with:
+          project_id: 'blog-gorman-club-root'
+          workload_identity_provider: ${{ vars.WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.SERVICE_ACCOUNT }}
+          secrets_list: |
+            TF_VAR_github_provider_token=github_provider_token
+            TF_VAR_cloudflare_account_id=cloudflare_account_id
+            TF_VAR_cloudflare_api_token=cloudflare_api_token
+      - uses: ./.github/actions/terraform-pull-request
+        with:
+          terraform_directory: 'infrastructure/root'
+          config_directory: 'infrastructure/config/root'
+          secrets: ${{ steps.secrets.outputs.secrets }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+
+  # infrastructure/env/** is shared, so a change to it plans against both environments - see the
+  # `changed` job above.
+  infrastructure-staging:
+    needs: changed
+    if: needs.changed.outputs.infrastructure-staging == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        with:
+          workload_identity_provider: ${{ vars.WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.SERVICE_ACCOUNT }}
+      - uses: ./.github/actions/terraform-pull-request
+        with:
+          terraform_directory: 'infrastructure/env'
+          config_directory: 'infrastructure/config/staging'
+          # One client ID, defined in infrastructure/root, serves every environment.
+          secrets: |
+            TF_VAR_google_client_id=${{ vars.GOOGLE_CLIENT_ID }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+
+  infrastructure-prod:
+    needs: changed
+    if: needs.changed.outputs.infrastructure-prod == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        with:
+          workload_identity_provider: ${{ vars.WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.SERVICE_ACCOUNT }}
+      - uses: ./.github/actions/terraform-pull-request
+        with:
+          terraform_directory: 'infrastructure/env'
+          config_directory: 'infrastructure/config/prod'
+          # One client ID, defined in infrastructure/root, serves every environment.
+          secrets: |
+            TF_VAR_google_client_id=${{ vars.GOOGLE_CLIENT_ID }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+

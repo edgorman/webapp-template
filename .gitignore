@@ -1,0 +1,5 @@
+# moon's local cache and downloaded schemas.
+.moon/cache
+
+# Claude Code personal settings overrides - never committed.
+.claude/settings.local.json

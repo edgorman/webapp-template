@@ -1,0 +1,108 @@
+name: 'Terraform Pull Request'
+description: 'Performs terraform init, fmt, validate, and plan'
+
+inputs:
+  terraform_directory:
+    description: 'The directory containing the Terraform files'
+    required: true
+  config_directory:
+    description: 'The directory containing the configuration files (backend and vars)'
+    required: true
+  secrets:
+    description: 'Newline-separated list of secrets or env vars to export (e.g., KEY=VALUE)'
+    required: false
+    default: ''
+  github_token:
+    description: 'GitHub token for posting comments'
+    required: true
+
+runs:
+  using: "composite"
+  steps:
+    # The values arrive as an environment variable rather than spliced into the script with ${{ }}.
+    # An expression is substituted into the source text before bash ever sees it, so a value holding
+    # a quote or a $(...) would stop being data and start being code; through the environment it can
+    # only ever be a string. See the same step in terraform-push-commit and frontend-deploy.
+    - name: Export Secrets
+      shell: bash
+      env:
+        SECRETS: ${{ inputs.secrets }}
+      run: |
+        if [ -n "$SECRETS" ]; then
+          printf '%s\n' "$SECRETS" >> "$GITHUB_ENV"
+        fi
+
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4
+      with:
+        terraform_version: "1.15.8"
+
+    - name: Terraform Init
+      shell: bash
+      working-directory: ${{ inputs.terraform_directory }}
+      run: |
+        terraform init \
+          -backend-config="${{ github.workspace }}/${{ inputs.config_directory }}/terraform.tfbackend"
+
+    - name: Terraform Format
+      shell: bash
+      working-directory: ${{ inputs.terraform_directory }}
+      run: terraform fmt -check
+
+    - name: Terraform Validate
+      shell: bash
+      working-directory: ${{ inputs.terraform_directory }}
+      run: terraform validate
+
+    - name: Terraform Plan
+      id: plan
+      shell: bash
+      working-directory: ${{ inputs.terraform_directory }}
+      run: |
+        terraform plan \
+          -var-file="${{ github.workspace }}/${{ inputs.config_directory }}/terraform.tfvars" \
+          -lock=false \
+          -no-color \
+          -input=false \
+          -out=tfplan.binary
+        terraform show -no-color tfplan.binary > tfplan.txt
+
+    # A merge_group run has no PR to comment on; the plan above still has to succeed.
+    - name: Post Terraform Plan Comment
+      if: github.event_name == 'pull_request'
+      uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+      with:
+        github-token: ${{ inputs.github_token }}
+        script: |
+          const fs = require('fs');
+          const path = require('path');
+
+          // GitHub's comment size limit, with room for the formatting below.
+          const MAX_COMMENT_LENGTH = 65000;
+
+          const environmentName = path.basename('${{ inputs.config_directory }}');
+          const planPath = path.join('${{ github.workspace }}', '${{ inputs.terraform_directory }}', 'tfplan.txt');
+          const plan = fs.readFileSync(planPath, 'utf8');
+          const truncatedPlan = plan.length > MAX_COMMENT_LENGTH
+            ? plan.substring(0, MAX_COMMENT_LENGTH) + '\n\n... (output truncated due to length)'
+            : plan;
+
+          const output = `### Terraform Plan for \`${environmentName}\` Environment
+
+          <details>
+          <summary>Show Plan</summary>
+
+          \`\`\`hcl
+          ${truncatedPlan}
+          \`\`\`
+
+          </details>
+
+          *Pusher: @${{ github.actor }}, Action: \`${{ github.event_name }}\`, Working Directory: \`${{ inputs.terraform_directory }}\`, Workflow: \`${{ github.workflow }}\`*`;
+
+          await github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: output
+          });

@@ -1,0 +1,32 @@
+name: 'Frontend Build'
+description: 'Installs dependencies and builds the frontend production bundle'
+
+inputs:
+  google_client_id:
+    description: 'Google OAuth 2.0 client ID, baked in as VITE_GOOGLE_CLIENT_ID. Not a secret - it identifies the app.'
+    required: false
+    default: ''
+
+runs:
+  using: "composite"
+  steps:
+    - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+      with:
+        node-version: '22'
+        cache: 'npm'
+        cache-dependency-path: services/frontend/package-lock.json
+
+    - name: Install Dependencies
+      shell: bash
+      working-directory: services/frontend
+      run: npm ci
+
+    # No backend URL baked in here - the bundle is environment-neutral (see the Configuration
+    # section of services/frontend/README.md) so the same dist/ is published to every environment
+    # and told which backend to call at deploy time via config.json.
+    - name: Build
+      shell: bash
+      working-directory: services/frontend
+      env:
+        VITE_GOOGLE_CLIENT_ID: ${{ inputs.google_client_id }}
+      run: npm run build

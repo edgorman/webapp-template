@@ -1,0 +1,107 @@
+import { useEffect } from 'react'
+import { Link } from 'react-router-dom'
+import { useApp } from '../context/AppContext'
+import { userPath } from '../lib/api'
+import { releaseUrl } from '../lib/format'
+import { GoogleSignInButton } from './GoogleSignInButton'
+
+const CloseIcon = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M18 6 6 18" />
+    <path d="m6 6 12 12" />
+  </svg>
+)
+
+interface Props {
+  onClose: () => void
+}
+
+/** The account overlay opened from NavBar's account button: sign in/out, a New post shortcut, and
+ * (pinned to the bottom, see .panel-deploy-info) this build's release tag and staging badge. */
+export function AccountPanel({ onClose }: Props) {
+  const { user, profile, authError, authReady, renderSignInButton, signOut, version, environment } = useApp()
+  // The profile page and its editor are both addressed by the username, and the editor sits under
+  // the profile it edits - so neither has a path until the profile has loaded.
+  const profileHref = profile ? userPath(profile.username) : null
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose()
+    }
+    document.addEventListener('keydown', onKeyDown)
+    return () => document.removeEventListener('keydown', onKeyDown)
+  }, [onClose])
+
+  return (
+    <div className="panel-backdrop" onClick={onClose}>
+      <div className="panel-drawer" role="dialog" aria-label="Account" onClick={(e) => e.stopPropagation()}>
+        <div className="panel-drawer-header">
+          <span className="panel-drawer-title">Account</span>
+          <button type="button" className="btn btn-icon btn-secondary" aria-label="Close" onClick={onClose}>
+            <CloseIcon />
+          </button>
+        </div>
+
+        {user ? (
+          <>
+            <div className="panel-identity">
+              <div className="gc-avatar" aria-hidden="true">
+                {(profile?.username ?? '?').charAt(0).toUpperCase()}
+              </div>
+              <div>
+                <div className="panel-identity-name">{profile?.username ?? 'Loading…'}</div>
+                <div className="text-muted panel-identity-email">{user.email}</div>
+              </div>
+            </div>
+            <Link to="/post/new" className="btn btn-primary btn-block" onClick={onClose}>
+              New post
+            </Link>
+            {profileHref && (
+              <>
+                <Link to={profileHref} className="btn btn-secondary btn-block" onClick={onClose}>
+                  View profile
+                </Link>
+                <Link to={`${profileHref}/edit`} className="btn btn-secondary btn-block" onClick={onClose}>
+                  Edit profile
+                </Link>
+              </>
+            )}
+            <button type="button" className="btn btn-ghost btn-block" onClick={() => { signOut(); onClose() }}>
+              Sign out
+            </button>
+          </>
+        ) : (
+          <>
+            <p className="text-muted">Sign in to publish and manage your posts.</p>
+            {authError ? <p role="alert">{authError}</p> : <GoogleSignInButton ready={authReady} onRender={renderSignInButton} />}
+            {/* Signing in is what creates the account (AppProvider's first PUT /users/me), so this
+                is where the terms are agreed to (#239). */}
+            <p className="text-muted panel-terms">
+              By creating an account you agree to the{' '}
+              <Link to="/terms" onClick={onClose}>Terms</Link> and{' '}
+              <Link to="/privacy" onClick={onClose}>Privacy Policy</Link>.
+            </p>
+          </>
+        )}
+
+        {(version || environment === 'staging') && (
+          <div className="panel-deploy-info">
+            {/* Only staging says so - a production reader has no reason to be told they're on
+                production (see issue #152). */}
+            {environment === 'staging' && <span className="tag tag-outline">staging</span>}
+            {version && (
+              <a
+                className="panel-version text-muted"
+                href={releaseUrl(version)}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                {version}
+              </a>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
