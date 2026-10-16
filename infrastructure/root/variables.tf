@@ -73,3 +73,15 @@ variable "frontend_hostnames" {
   description = "Full hostname of each environment's frontend, inside cloudflare_zone, e.g. { stag = \"staging.example.com\", prod = \"example.com\" }"
   type        = map(string)
 }
+
+variable "backend_registry_keep_count" {
+  description = "How many of the most recent Artifact Registry versions the backend repository keeps in each environment's registry; everything older is deleted by the repository's cleanup_policies. See the Artifact Stores section of infrastructure/AGENTS.md for how this number was chosen."
+  type        = number
+  default     = 30
+}
+
+variable "frontend_retention_days" {
+  description = "How many days a commit-SHA folder survives in the frontend bucket in each environment's bucket before the bucket's lifecycle rule deletes it. See the Artifact Stores section of infrastructure/AGENTS.md for how this number was chosen."
+  type        = number
+  default     = 90
+}

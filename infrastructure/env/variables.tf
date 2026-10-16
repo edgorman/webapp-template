@@ -65,15 +65,3 @@ variable "alert_rate_limited_count_threshold" {
   type        = number
   default     = 20
 }
-
-variable "backend_registry_keep_count" {
-  description = "How many of the most recent Artifact Registry versions the backend repository keeps (each environment's own registry, since every merge writes to both - see Staging Deployments in .github/AGENTS.md); everything older is deleted by the repository's cleanup_policies. See the Artifact Stores section of infrastructure/AGENTS.md for how this number was chosen."
-  type        = number
-  default     = 30
-}
-
-variable "frontend_retention_days" {
-  description = "How many days a commit-SHA folder survives in the frontend bucket (each environment's own bucket, since every merge writes to both - see Staging Deployments in .github/AGENTS.md) before the bucket's lifecycle rule deletes it. See the Artifact Stores section of infrastructure/AGENTS.md for how this number was chosen."
-  type        = number
-  default     = 90
-}
