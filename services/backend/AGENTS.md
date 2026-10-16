@@ -22,4 +22,4 @@ The Go API on Cloud Run. `README.md` here has the API, configuration, how to run
 ## Container image
 
 - `services/backend:image` builds the Dockerfile with `COMMIT_SHA`; CI builds it on every PR but only publishes on merge ([12](../../docs/decisions/0012-hand-declared-moon-graph.md)).
-- A second binary goes under `cmd/`, built from the same Dockerfile with `CMD=<name>`, as its own moon project and image matrix leg ([12](../../docs/decisions/0012-hand-declared-moon-graph.md)).
+- A second binary goes under `cmd/`, built from the same Dockerfile with `CMD=<name>`, as its own moon project with a `publish` marker, an image matrix leg and a line in `push-commit.yaml`'s `changed` job ([12](../../docs/decisions/0012-hand-declared-moon-graph.md), [26](../../docs/decisions/0026-build-only-what-changed.md)).

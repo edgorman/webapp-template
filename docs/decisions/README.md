@@ -2,7 +2,7 @@
 
 One file per decision: its context, the decision, and its consequences. The rules that follow from them are in the `AGENTS.md` files, each linking here. A record changes only when it is superseded: write a new one, and mark the old one `Superseded by N`.
 
-These records came with the template. They hold for any repository made from it until you supersede them; number your own from 25.
+These records came with the template. They hold for any repository made from it until you supersede them; number your own from the next free number.
 
 | # | Decision | Area |
 | --- | --- | --- |
@@ -30,3 +30,5 @@ These records came with the template. They hold for any repository made from it 
 | [22](0022-artifact-retention.md) | Artifact retention keeps recent merges and every release | infrastructure |
 | [23](0023-monitoring-on-cloud-run-metrics.md) | Monitoring watches Cloud Run's own metrics | infrastructure |
 | [24](0024-debug-endpoint-contract.md) | The debug endpoint contract | backend |
+| [25](0025-apply-saved-plans.md) | Applies use the plan already shown | ci |
+| [26](0026-build-only-what-changed.md) | Build only what changed, reuse the rest | ci |
