@@ -8,6 +8,7 @@ Workflows, composite actions, repository settings and the moon setup CI runs thr
 - Every job that needs GCP or Cloudflare is skipped while `vars.WORKLOAD_IDENTITY_PROVIDER` is empty (the `changed` jobs and `promote-release.yaml`'s first job carry the `if:`, and everything else needs them), so a repository made from the template runs only PR checks until its root bootstrap ([20](../docs/decisions/0020-workload-identity-federation.md)).
 - Every pipeline has an environment-scoped concurrency group.
 - Shared steps live in composite actions under `.github/actions/`.
+- Applies run the saved plan for their tree from `plans/<env>/` in the state bucket, falling back to planning on the spot when it is missing or stale. Pass `plan_dir` to both Terraform actions; never save a plan as a workflow artifact ([25](../docs/decisions/0025-apply-saved-plans.md)).
 
 ### Building with moon
 
@@ -24,7 +25,7 @@ Workflows, composite actions, repository settings and the moon setup CI runs thr
 
 ### Staging Deployments
 
-- Every merge builds the backend image and the frontend `dist/` once, publishes them by commit SHA to both staging's and prod's stores, and deploys staging from them, whether or not the service changed ([15](../docs/decisions/0015-build-once-promote-by-sha.md)).
+- Every merge publishes the backend image and the frontend `dist/` by commit SHA to both staging's and prod's stores ([15](../docs/decisions/0015-build-once-promote-by-sha.md)). Only what its `publish` marker marks affected is built; the rest is the last release's, re-tagged or re-published, and an unchanged image isn't redeployed. List every action and workflow a service's build uses in its marker ([26](../docs/decisions/0026-build-only-what-changed.md)).
 - The frontend bundle carries nothing environment-specific; `config.json` is written at deploy time ([15](../docs/decisions/0015-build-once-promote-by-sha.md)).
 
 ### Pre-Release Generation

@@ -55,4 +55,4 @@ The merge applies staging's infrastructure, builds and deploys the backend and f
 ## 7. Make it yours
 
 - Replace or delete the `notes` example (`services/backend/README.md`'s "Adding a resource" lists every place it lives), and the frontend pages built on it.
-- Keep the decision records in [`decisions/`](decisions/README.md) that still hold, supersede the ones that don't, and number your own from 25.
+- Keep the decision records in [`decisions/`](decisions/README.md) that still hold, supersede the ones that don't, and number your own after the last one.
