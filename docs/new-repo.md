@@ -42,7 +42,7 @@ cd infrastructure/root
 TF_VAR_github_provider_token=<PAT> TF_VAR_cloudflare_account_id=<ID> TF_VAR_cloudflare_api_token=<TOKEN> make init
 ```
 
-It creates the environment projects, the state buckets, Workload Identity Federation for this repository, the Cloudflare Pages projects and DNS records, stores the three credentials in Secret Manager, and writes the repository variables the workflows read (`WORKLOAD_IDENTITY_PROVIDER`, `SERVICE_ACCOUNT`, `GOOGLE_CLIENT_ID`, `GCP_ROOT_PROJECT`, `GCP_PROJECT_PREFIX`, `GCP_REGION`, `SITE_NAME`, `STAGING_URL`, `PRODUCTION_URL`). Then it moves its own state into the bucket it made.
+It creates the environment projects, the state buckets, each environment's artifact registry and frontend bucket, Workload Identity Federation for this repository, the Cloudflare Pages projects and DNS records, stores the three credentials in Secret Manager, and writes the repository variables the workflows read (`WORKLOAD_IDENTITY_PROVIDER`, `SERVICE_ACCOUNT`, `GOOGLE_CLIENT_ID`, `GCP_ROOT_PROJECT`, `GCP_PROJECT_PREFIX`, `GCP_REGION`, `SITE_NAME`, `STAGING_URL`, `PRODUCTION_URL`). Then it moves its own state into the bucket it made.
 
 ## 5. Open the first pull request
 

@@ -8,7 +8,7 @@ Terraform roots: `env` (applied per environment from `config/staging` and `confi
 
 ### Root Environment
 
-- `infrastructure/root` owns the root project, both environment projects, every state bucket, the WIF pool and provider, shared DNS, the baseline APIs and the GitHub Actions variables the workflows read. Its first apply is the only manual one (`docs/new-repo.md`); everything after goes through CI ([19](../docs/decisions/0019-one-gcp-project-per-environment.md)).
+- `infrastructure/root` owns the root project, both environment projects, every state bucket, every environment's artifact stores, the WIF pool and provider, shared DNS, the baseline APIs and the GitHub Actions variables the workflows read. Its first apply is the only manual one (`docs/new-repo.md`); everything after goes through CI ([19](../docs/decisions/0019-one-gcp-project-per-environment.md)).
 
 ### IAM & Authentication
 
@@ -19,6 +19,7 @@ Terraform roots: `env` (applied per environment from `config/staging` and `confi
 ### Artifact Stores
 
 - Each environment has its own registry (`backend`) and bucket (`<gcp-project-id>-frontend`), written once by the job that built the artifact and read only within that project ([21](../docs/decisions/0021-per-environment-artifact-stores.md)).
+- Root creates them (`root/artifact_stores.tf`), because every merge writes to every environment's stores and env only reaches prod on promotion. Anything a merge writes into every environment goes in root, never env ([27](../docs/decisions/0027-artifact-stores-in-root.md)).
 - Retention: keep the newest `backend_registry_keep_count` versions per image plus every `release-` tag; delete frontend folders after `frontend_retention_days`. Both stay dry-run until the output is reviewed ([22](../docs/decisions/0022-artifact-retention.md)).
 
 ## Monitoring & Alerting

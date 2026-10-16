@@ -32,3 +32,4 @@ These records came with the template. They hold for any repository made from it 
 | [24](0024-debug-endpoint-contract.md) | The debug endpoint contract | backend |
 | [25](0025-apply-saved-plans.md) | Applies use the plan already shown | ci |
 | [26](0026-build-only-what-changed.md) | Build only what changed, reuse the rest | ci |
+| [27](0027-artifact-stores-in-root.md) | Artifact stores are created by root, not by each environment | infrastructure |
