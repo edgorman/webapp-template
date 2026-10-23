@@ -112,7 +112,7 @@ jobs:
       - uses: ./.github/actions/frontend-deploy
         with:
           secrets: ${{ steps.secrets.outputs.secrets }}
-          cloudflare_project_name: 'frontend-prod'
+          cloudflare_project_name: '${{ vars.GCP_PROJECT_PREFIX }}-prod'
           backend_url: ${{ needs.services-backend.outputs.backend_url }}
           version: ${{ github.event.release.tag_name }}
           environment: 'production'

@@ -8,12 +8,11 @@ gcp_projects            = ["stag", "prod"]
 github_repository_owner = "your-github-user"
 github_repository_name  = "your-repo"
 
-site_name       = "My App"
-cloudflare_zone = "example.com"
-frontend_hostnames = {
-  stag = "staging.example.com"
-  prod = "example.com"
-}
+site_name = "My App"
+# No custom domain: the frontends are served at https://myapp-stag.pages.dev and
+# https://myapp-prod.pages.dev. To add one, set cloudflare_zone and frontend_hostnames, e.g.
+# cloudflare_zone    = "example.com"
+# frontend_hostnames = { stag = "staging.example.com", prod = "example.com" }
 
 # Created by hand once (Google Cloud Console > Credentials > OAuth client ID, in the root
 # project) and set here; see services/frontend/README.md. Not a secret - the ID-token flow this
