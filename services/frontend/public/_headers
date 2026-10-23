@@ -3,10 +3,10 @@
 # and frontend-deploy pushes to Pages - so this file ships with the build rather than being
 # configured per environment in the Cloudflare dashboard.
 #
-# The Content-Security-Policy is the second line of defence behind src/lib/markdown.ts, which
-# sanitizes every post before it is rendered. It matters because the two fail in different ways: a
-# sanitizer bug is a hole in one dependency, while script-src without 'unsafe-inline' means an
-# injected `onerror=` or `<script>` does not execute even if something does slip through.
+# The Content-Security-Policy is the second line of defence behind React's escaping, which renders
+# every note as plain text. It matters because the two fail in different ways: the first
+# `dangerouslySetInnerHTML` or HTML renderer added is a hole in one place, while script-src without
+# 'unsafe-inline' means an injected `onerror=` or `<script>` does not execute even if one slips in.
 #
 # The Google Identity Services sources are the ones Google documents for GSI. The rest of the
 # allowances each answer to something the app already loads: fonts.googleapis.com and

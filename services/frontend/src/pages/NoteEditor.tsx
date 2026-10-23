@@ -116,9 +116,9 @@ export function NoteEditor() {
       </header>
 
       <div className="field">
-        <label htmlFor="gc-title">Title</label>
+        <label htmlFor="app-title">Title</label>
         <input
-          id="gc-title"
+          id="app-title"
           className="input"
           placeholder="Untitled note"
           value={draft.title}
@@ -140,9 +140,9 @@ export function NoteEditor() {
         ))}
       </div>
 
-      <div className="gc-pane">
+      <div className="app-pane">
         <textarea
-          className="gc-editor"
+          className="app-editor"
           aria-label="Body"
           placeholder="Write something..."
           value={draft.body}

@@ -52,7 +52,7 @@ export function NavBar() {
       {user ? (
         <button
           type="button"
-          className="gc-avatar"
+          className="app-avatar"
           aria-label="Account"
           aria-haspopup="dialog"
           aria-expanded={accountOpen}

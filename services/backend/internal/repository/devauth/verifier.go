@@ -13,7 +13,7 @@ import (
 )
 
 // Token is the development token. "dev:<uid>" signs in as another account, so access rules that
-// need a second reader (a whitelisted post, someone else's comment) can be tried locally too.
+// need a second reader (someone else's private note) can be tried locally too.
 const Token = "dev"
 
 var _ repository.TokenVerifier = TokenVerifier{}
