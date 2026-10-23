@@ -158,7 +158,7 @@ jobs:
       - uses: ./.github/actions/frontend-deploy
         with:
           secrets: ${{ steps.secrets.outputs.secrets }}
-          cloudflare_project_name: 'frontend-stag'
+          cloudflare_project_name: '${{ vars.GCP_PROJECT_PREFIX }}-stag'
           backend_url: ${{ steps.backend.outputs.backend_url }}
           # The exact tag pre-release (below) will cut for this commit - computed once by the
           # version job above and reused here, rather than each recomputing it, so the two never

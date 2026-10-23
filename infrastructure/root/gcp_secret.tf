@@ -1,4 +1,5 @@
-# Stores the GitHub PAT so CI can re-apply this module after the one-time manual bootstrap.
+# Stores the GitHub PAT so CI can re-apply this module after the one-time manual bootstrap. Each
+# secret waits for the Secret Manager API, which the same bootstrap apply enables.
 resource "google_secret_manager_secret" "github_provider_token" {
   project   = var.gcp_provider_project_id
   secret_id = "github_provider_token"
@@ -6,6 +7,8 @@ resource "google_secret_manager_secret" "github_provider_token" {
   replication {
     auto {}
   }
+
+  depends_on = [google_project_service.project_services]
 }
 
 resource "google_secret_manager_secret_version" "github_provider_token_v1" {
@@ -29,6 +32,8 @@ resource "google_secret_manager_secret" "cloudflare_account_id" {
   replication {
     auto {}
   }
+
+  depends_on = [google_project_service.project_services]
 }
 
 resource "google_secret_manager_secret_version" "cloudflare_account_id_v1" {
@@ -50,6 +55,8 @@ resource "google_secret_manager_secret" "cloudflare_api_token" {
   replication {
     auto {}
   }
+
+  depends_on = [google_project_service.project_services]
 }
 
 resource "google_secret_manager_secret_version" "cloudflare_api_token_v1" {

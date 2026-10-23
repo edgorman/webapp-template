@@ -65,13 +65,15 @@ variable "site_name" {
 }
 
 variable "cloudflare_zone" {
-  description = "The Cloudflare zone (domain) the frontend hostnames live in, e.g. example.com"
+  description = "The Cloudflare zone (domain) the frontend hostnames live in, e.g. example.com. Empty when there is no domain: the frontends are then served only at their pages.dev subdomains."
   type        = string
+  default     = ""
 }
 
 variable "frontend_hostnames" {
-  description = "Full hostname of each environment's frontend, inside cloudflare_zone, e.g. { stag = \"staging.example.com\", prod = \"example.com\" }"
+  description = "Full hostname of each environment's frontend, inside cloudflare_zone, e.g. { stag = \"staging.example.com\", prod = \"example.com\" }. An environment left out is served at its pages.dev subdomain."
   type        = map(string)
+  default     = {}
 }
 
 variable "backend_registry_keep_count" {

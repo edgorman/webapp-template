@@ -2,7 +2,7 @@
 
 From **Use this template** to a deployed staging site. Until step 6, the new repository's workflows run only the PR checks; every job that needs GCP or Cloudflare skips itself while the `WORKLOAD_IDENTITY_PROVIDER` repository variable is unset.
 
-You need a GCP billing account, a Cloudflare account with your domain on it as a zone, and the toolchain from [`start-here.md`](start-here.md) plus the gcloud CLI.
+You need a GCP billing account, a Cloudflare account, and the toolchain from [`start-here.md`](start-here.md) plus the gcloud CLI. A domain is optional: without one, the frontends are served at their Cloudflare `pages.dev` subdomains, and adding a domain later is a tfvars change.
 
 ## 1. Create the repository
 
@@ -11,6 +11,8 @@ Click **Use this template** on GitHub. Then, in the new repository:
 - `.github/settings.yml`: set `name` and `description`, and set `is_template` to `false` (or delete the line). The [Settings app](https://github.com/apps/settings) applies this file, and the branch protection in it, once installed on the repository.
 - `.github/CODEOWNERS`: replace the owner with yours.
 - `LICENSE`: your name, or your own licence.
+- `README.md`: retitle it with your project's name and replace the template intro (and its **Use this template** line) with what your project does.
+- `AGENTS.md` and `docs/start-here.md`: reword the lines pointing at this file, which talk about making a repository from the template; it is now the guide to setting up the cloud side from scratch.
 
 ## 2. Name your project
 
@@ -18,9 +20,9 @@ Every name lives in five files; nothing else in the repository needs editing. Pi
 
 | File | Set |
 | --- | --- |
-| `infrastructure/config/root/terraform.tfvars` | `gcp_provider_project_id` (`<prefix>-root`), region and zone, `gcp_project_prefix`, `github_repository_owner`/`_name`, `site_name`, `cloudflare_zone`, `frontend_hostnames` |
+| `infrastructure/config/root/terraform.tfvars` | `gcp_provider_project_id` (`<prefix>-root`), region and zone, `gcp_project_prefix`, `github_repository_owner`/`_name`, `site_name`; with a domain, `cloudflare_zone` and `frontend_hostnames` |
 | `infrastructure/config/root/terraform.tfbackend` | `<prefix>-root-terraform-state` |
-| `infrastructure/config/staging/terraform.tfvars` | `gcp_project_id` (`<prefix>-stag`), `gcp_region`, `backend_cors_origin` (`https://` + the `stag` hostname), `alert_notification_emails` |
+| `infrastructure/config/staging/terraform.tfvars` | `gcp_project_id` (`<prefix>-stag`), `gcp_region`, `backend_cors_origin` (`https://` + the `stag` hostname, or `https://<prefix>-stag.pages.dev` without a domain), `alert_notification_emails` (`[]` to email nobody) |
 | `infrastructure/config/staging/terraform.tfbackend` | `<prefix>-stag-terraform-state` |
 | `infrastructure/config/prod/terraform.tfvars` and `.tfbackend` | the same for `prod` |
 
@@ -29,9 +31,9 @@ Optionally rename the Go module (`go mod edit -module` in `services/backend`, th
 ## 3. Create the root project and credentials
 
 1. Create the GCP project `<prefix>-root` by hand and link it to your billing account. Everything else is created by Terraform.
-2. In that project, create an OAuth 2.0 client ID for Google sign-in (see "Google Sign-In" in `services/frontend/README.md`) and set `google_client_id` in the root `terraform.tfvars`. Its authorized JavaScript origins are `http://localhost:5173` and both `frontend_hostnames`.
+2. In that project, create an OAuth 2.0 client ID for Google sign-in (see "Google Sign-In" in `services/frontend/README.md`) and set `google_client_id` in the root `terraform.tfvars`. Its authorized JavaScript origins are `http://localhost:5173` and both site URLs (the `frontend_hostnames`, or the `pages.dev` subdomains).
 3. Create a GitHub fine-grained personal access token for the new repository with read and write access to **Variables**.
-4. Create a Cloudflare API token with **Account: Cloudflare Pages: Edit**, **Zone: DNS: Edit** and **Zone: Zone: Read** on your zone, and note your Cloudflare account id.
+4. Create a Cloudflare API token with **Account: Cloudflare Pages: Edit** (plus **Zone: DNS: Edit** and **Zone: Zone: Read** on your zone, if you have a domain), and note your Cloudflare account id.
 
 ## 4. Bootstrap the root
 
@@ -42,7 +44,9 @@ cd infrastructure/root
 TF_VAR_github_provider_token=<PAT> TF_VAR_cloudflare_account_id=<ID> TF_VAR_cloudflare_api_token=<TOKEN> make init
 ```
 
-It creates the environment projects, the state buckets, each environment's artifact registry and frontend bucket, Workload Identity Federation for this repository, the Cloudflare Pages projects and DNS records, stores the three credentials in Secret Manager, and writes the repository variables the workflows read (`WORKLOAD_IDENTITY_PROVIDER`, `SERVICE_ACCOUNT`, `GOOGLE_CLIENT_ID`, `GCP_ROOT_PROJECT`, `GCP_PROJECT_PREFIX`, `GCP_REGION`, `SITE_NAME`, `STAGING_URL`, `PRODUCTION_URL`). Then it moves its own state into the bucket it made.
+It creates the environment projects, the state buckets, each environment's artifact registry and frontend bucket, Workload Identity Federation for this repository, the Cloudflare Pages projects (and, with a domain, their custom domains and DNS records), stores the three credentials in Secret Manager, and writes the repository variables the workflows read (`WORKLOAD_IDENTITY_PROVIDER`, `SERVICE_ACCOUNT`, `GOOGLE_CLIENT_ID`, `GCP_ROOT_PROJECT`, `GCP_PROJECT_PREFIX`, `GCP_REGION`, `SITE_NAME`, `STAGING_URL`, `PRODUCTION_URL`). Then it moves its own state into the bucket it made.
+
+Without a domain, check `terraform output frontend_subdomains`: Cloudflare adds a suffix when a `pages.dev` name is already taken, and if it did, use the real subdomain in `backend_cors_origin` and the OAuth client's origins.
 
 ## 5. Open the first pull request
 

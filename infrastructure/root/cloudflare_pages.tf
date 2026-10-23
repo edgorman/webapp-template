@@ -1,16 +1,19 @@
-# Pages projects and custom domains, one pair per environment; names must match the
-# cloudflare_project_name inputs in push-commit.yaml / promote-release.yaml.
+# A Pages project per environment, named <gcp_project_prefix>-<env> to match the
+# cloudflare_project_name inputs in push-commit.yaml / promote-release.yaml. Each is served at its
+# pages.dev subdomain, plus a custom domain for every entry in frontend_hostnames.
 data "cloudflare_zone" "site" {
+  count = var.cloudflare_zone == "" ? 0 : 1
+
   filter = {
     name = var.cloudflare_zone
   }
 }
 
 resource "cloudflare_pages_project" "frontend" {
-  for_each = var.frontend_hostnames
+  for_each = toset(var.gcp_projects)
 
   account_id        = var.cloudflare_account_id
-  name              = "frontend-${each.key}"
+  name              = "${var.gcp_project_prefix}-${each.key}"
   production_branch = "main"
 }
 
@@ -27,7 +30,7 @@ resource "cloudflare_pages_domain" "frontend" {
 resource "cloudflare_dns_record" "frontend" {
   for_each = var.frontend_hostnames
 
-  zone_id = data.cloudflare_zone.site.id
+  zone_id = data.cloudflare_zone.site[0].id
   # Relative to the zone; the zone apex stays the full name, which Cloudflare reads as "@".
   name    = trimsuffix(each.value, ".${var.cloudflare_zone}")
   type    = "CNAME"

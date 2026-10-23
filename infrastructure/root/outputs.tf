@@ -18,8 +18,13 @@ output "github_actions_service_account_email" {
   value       = google_service_account.github_actions.email
 }
 
+output "frontend_subdomains" {
+  description = "pages.dev subdomain of each environment's Cloudflare Pages project"
+  value       = { for k, v in cloudflare_pages_project.frontend : k => v.subdomain }
+}
+
 output "frontend_domains" {
-  description = "Custom domain bound to each environment's Cloudflare Pages project"
+  description = "Custom domain bound to each environment's Cloudflare Pages project, if any"
   value       = { for k, v in cloudflare_pages_domain.frontend : k => v.name }
 }
 
