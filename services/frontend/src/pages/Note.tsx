@@ -69,15 +69,15 @@ export function Note() {
         )}
       </div>
       <header style={{ paddingBottom: 'var(--space-4)' }}>
-        <div className="post-meta">
+        <div className="note-meta">
           {note.createdAt && <span className="text-muted feed-row-date">{formatDate(note.createdAt)}</span>}
           {note.visibility === 'private' && <span className="tag tag-outline">private</span>}
         </div>
-        <h1 className="title-post">{note.title || '(untitled)'}</h1>
-        <span className="text-muted post-author">by {note.authorUsername || 'an unnamed author'}</span>
+        <h1 className="title-note">{note.title || '(untitled)'}</h1>
+        <span className="text-muted note-author">by {note.authorUsername || 'an unnamed author'}</span>
       </header>
       <hr className="hr" />
-      <div className="post-body">
+      <div className="note-body">
         {note.body}
       </div>
     </div>

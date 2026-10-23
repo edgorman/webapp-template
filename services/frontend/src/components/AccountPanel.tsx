@@ -39,9 +39,9 @@ function UsernameForm() {
           .finally(() => setSaving(false))
       }}
     >
-      <label htmlFor="gc-username">Username</label>
+      <label htmlFor="app-username">Username</label>
       <div style={{ display: 'flex', gap: 'var(--space-2)' }}>
-        <input id="gc-username" className="input" value={username} onChange={(e) => setUsername(e.target.value)} />
+        <input id="app-username" className="input" value={username} onChange={(e) => setUsername(e.target.value)} />
         <button type="submit" className="btn btn-secondary" disabled={!changed || saving}>
           {saving ? 'Saving…' : 'Save'}
         </button>
@@ -83,7 +83,7 @@ export function AccountPanel({ onClose }: Props) {
         {user ? (
           <>
             <div className="panel-identity">
-              <div className="gc-avatar" aria-hidden="true">
+              <div className="app-avatar" aria-hidden="true">
                 {(profile?.username ?? '?').charAt(0).toUpperCase()}
               </div>
               <div>

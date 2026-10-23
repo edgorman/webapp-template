@@ -2,7 +2,7 @@ import { useCallback, useState } from 'react'
 
 export type Theme = 'light' | 'dark'
 
-const STORAGE_KEY = 'gc-theme'
+const STORAGE_KEY = 'app:theme'
 
 function withStorage<T>(fn: () => T): T | undefined {
   try {
